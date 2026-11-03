@@ -1,0 +1,38 @@
+ASCII City Wallpaper 0.5.0
+
+The portable application uses open-source components including Rust, Tauri,
+Wry, Tao, windows-rs, serde, serde_json, chrono, rand, tiny_http, sysinfo,
+wasapi, rustfft, image, and their dependencies. Version pins and license
+metadata are recorded in apps/shell/Cargo.lock and the Cargo registry metadata.
+The browser frontend uses get-east-asian-width (MIT).
+
+Rust: MIT OR Apache-2.0, https://www.rust-lang.org/policies/licenses
+Tauri / Wry / Tao: MIT OR Apache-2.0, https://github.com/tauri-apps/tauri
+windows-rs: MIT OR Apache-2.0, https://github.com/microsoft/windows-rs
+wasapi: MIT, https://github.com/HEnquist/wasapi-rs
+rustfft: MIT OR Apache-2.0, https://github.com/ejmahler/RustFFT
+image: MIT OR Apache-2.0, https://github.com/image-rs/image
+get-east-asian-width: MIT, https://github.com/sindresorhus/get-east-asian-width
+
+WebView2Loader.dll is the Microsoft WebView2 SDK loader, redistributed with
+the WebView2 Rust bindings. Microsoft WebView2 terms are available at:
+https://learn.microsoft.com/en-us/legal/microsoft-edge/microsoft-webview2-runtime
+The Evergreen WebView2 runtime is supplied by the user's Windows installation.
+
+Source code and complete dependency license files are available in this
+project's source distribution / local Cargo dependency cache. Development
+toolchains are not part of the portable ZIP.
+
+Weather data: Open-Meteo (https://open-meteo.com/), CC BY 4.0.
+Documentation: https://open-meteo.com/en/docs
+Attribution: Open-Meteo weather model data, used to animate local city scenes.
+The public free API is for non-commercial use; commercial distribution must
+comply with the provider's API terms: https://open-meteo.com/en/terms
+
+Offline city-name matching uses a reduced GeoNames cities15000 extract.
+GeoNames: https://www.geonames.org/, Creative Commons Attribution 4.0.
+Source: https://download.geonames.org/export/dump/cities15000.zip
+License: https://creativecommons.org/licenses/by/4.0/
+Only names, city coordinates and classification fields are retained.
+These data are approximate place points, not administrative boundaries.
+Provenance and checksum: apps/shell/data/cities-source.json

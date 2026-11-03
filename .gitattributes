@@ -1,0 +1,8 @@
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.png binary
+*.ico binary
+
+# Keep the original art references byte-for-byte intact.
+reference/ascii-city.html -text
+"ASCII 城市 · 美术原型.html" -text

@@ -1,0 +1,33 @@
+# Dependencies, toolchains and generated output
+node_modules/
+.npm-cache/
+.toolchain/
+apps/web/dist/
+apps/shell/target/
+apps/shell/gen/schemas/
+outputs/
+artifacts/
+.vitest/
+__pycache__/
+*.py[cod]
+*.exe
+*.dll
+*.pdb
+*.zip
+
+# Local runtime state and credentials; apps/shell/data is a public city index.
+/data/
+.codex/
+*.log
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# OS metadata
+.DS_Store
+Thumbs.db
+Desktop.ini

@@ -1,0 +1,8 @@
+{
+  "source": "https://download.geonames.org/export/dump/cities15000.zip",
+  "license": "CC BY 4.0",
+  "retrieved": "2026-11-02",
+  "rows": 31809,
+  "sourceSha256": "c7b7482b115463874798824f76381f84103233c0a9db9d43efe8501719200dc9",
+  "description": "Names and coordinates only; nearest-city labels are approximate, not administrative boundaries."
+}

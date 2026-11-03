@@ -1,0 +1,434 @@
+/* One syntax palette for the city console, data widgets and layout editor. */
+:root,
+:root[data-theme='dark'],
+:root:not([data-theme='light']) {
+  --panel-bg: rgba(8, 13, 21, 0.96);
+  --panel-line: #263743;
+  --text: #bdcad4;
+  --muted: #728695;
+  --accent: #79c9bb;
+  --accent-soft: rgba(121, 201, 187, 0.1);
+  --track: #2c414d;
+  --chip: #101d27;
+  --tip-bg: #0a151e;
+  --shadow: none;
+  --syntax-key: #8cbce5;
+  --syntax-value: #e0ba7c;
+  --syntax-comment: #667e82;
+  --terminal-bg: rgba(7, 14, 22, 0.88);
+  color-scheme: dark;
+}
+body {
+  font-family: Consolas, 'Cascadia Mono', 'Microsoft YaHei', monospace;
+}
+#weatherMoon {
+  position: fixed;
+  z-index: 1;
+  pointer-events: none;
+  border-radius: 50%;
+}
+#weatherMoon[hidden] {
+  display: none;
+}
+body[data-visual-theme='phosphor'] {
+  --text: #b2ddbd;
+  --accent: #86d29b;
+  --syntax-key: #96d9ad;
+  --syntax-value: #c4df91;
+  --panel-line: #2c4937;
+  --terminal-bg: rgba(4, 16, 10, 0.93);
+}
+body[data-visual-theme='ink'] {
+  --text: #363c3b;
+  --muted: #65716b;
+  --accent: #435a4c;
+  --syntax-key: #4a5e70;
+  --syntax-value: #856037;
+  --panel-line: #aeb5a9;
+  --terminal-bg: rgba(237, 236, 222, 0.95);
+  --panel-bg: #eeedde;
+  --chip: #ddded2;
+  --tip-bg: #eeedde;
+}
+#panel,
+#tip,
+#toast,
+#timeline,
+button,
+select,
+.chips button,
+.city-form input {
+  border-radius: 1px;
+  box-shadow: none;
+}
+#panel,
+#tip,
+#timeline {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+#panel {
+  border-top: 2px solid var(--accent);
+}
+.brand {
+  font-family: inherit;
+  letter-spacing: 0.07em;
+  font-size: 13px;
+}
+.brand::before {
+  content: '> ';
+  color: var(--accent);
+}
+.brand small {
+  letter-spacing: 0;
+  font-size: 10px;
+  margin-top: 5px;
+}
+.gh b::before {
+  content: '▸ ';
+  color: var(--syntax-comment);
+  font-weight: 400;
+}
+.gh #layoutBtn {
+  margin-left: auto;
+  white-space: nowrap;
+  font-size: 10px;
+}
+button,
+select,
+input {
+  font-family: inherit;
+}
+#panel button,
+#panel select,
+#timeline button,
+.layout-tools button {
+  border-radius: 0;
+}
+button.on {
+  box-shadow: inset 2px 0 var(--accent);
+}
+button:focus-visible,
+.widget-handle:focus-visible {
+  outline: 1px dashed var(--accent);
+  outline-offset: 3px;
+}
+#liveHud {
+  position: fixed;
+  inset: 0;
+  width: auto;
+  height: auto;
+  z-index: 3;
+  color: var(--text);
+  text-shadow: none;
+  pointer-events: none;
+  font-family: Consolas, 'Cascadia Mono', 'Microsoft YaHei', monospace;
+}
+.terminal-widget {
+  position: absolute;
+  width: 284px;
+  max-width: calc(100vw - 24px);
+  border: 1px solid var(--panel-line);
+  background: var(--terminal-bg);
+  border-radius: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  overflow: hidden;
+}
+.terminal-widget::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 6px;
+  height: 6px;
+  border-right: 1px solid var(--accent);
+  border-bottom: 1px solid var(--accent);
+  pointer-events: none;
+}
+.weather-card {
+  padding: 0 14px 13px;
+}
+.widget-handle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 29px;
+  padding: 5px 11px;
+  border-bottom: 1px solid var(--panel-line);
+  background: rgba(116, 166, 184, 0.045);
+  color: var(--syntax-key);
+  font:
+    11px Consolas,
+    'Cascadia Mono',
+    monospace;
+  letter-spacing: 0.02em;
+  touch-action: none;
+  user-select: none;
+}
+.weather-card > .widget-handle {
+  margin: 0 -14px 12px;
+}
+.syntax-comment {
+  color: var(--syntax-comment);
+}
+.syntax-key {
+  color: var(--syntax-key);
+  font-size: 11px;
+}
+.widget-grip {
+  display: none;
+  margin-left: auto;
+  color: var(--accent);
+  font:
+    10px Consolas,
+    'Microsoft YaHei',
+    monospace;
+}
+.hud-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font:
+    11px Consolas,
+    'Microsoft YaHei',
+    monospace;
+  color: var(--text);
+  letter-spacing: 0;
+}
+.hud-eyebrow time {
+  font-size: 10px;
+  color: var(--muted);
+  opacity: 1;
+}
+.live-dot {
+  display: block;
+  width: 5px;
+  height: 5px;
+  border-radius: 0;
+  background: var(--accent);
+  box-shadow: none;
+}
+#liveHud[data-live='false'] .live-dot {
+  background: var(--syntax-value);
+}
+#liveHud[data-live='false'] .hud-eyebrow::after {
+  content: '[SIM]';
+  font-size: 9px;
+  color: var(--syntax-value);
+}
+.weather-main {
+  margin: 12px 0 8px;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.weather-main strong {
+  font:
+    24px/1.1 Consolas,
+    'Cascadia Mono',
+    monospace;
+  color: var(--syntax-value);
+  letter-spacing: -0.04em;
+}
+#weatherCondition {
+  color: var(--text);
+  font-size: 11px;
+}
+#weatherSymbol {
+  font-size: 10px;
+  color: var(--accent);
+  opacity: 1;
+  letter-spacing: -0.05em;
+}
+.hud-details {
+  font:
+    10px/1.9 Consolas,
+    'Cascadia Mono',
+    monospace;
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+.hud-credit {
+  font-size: 9px;
+  line-height: 1.6;
+  color: var(--syntax-comment);
+  letter-spacing: 0;
+}
+.agents-widget {
+  width: 310px;
+  padding: 0;
+}
+.agent-feed {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  max-height: min(360px, calc(100vh - 80px));
+  overflow: auto;
+}
+.agent-card {
+  background: none;
+  border: 0;
+  border-bottom: 1px dashed var(--panel-line);
+  border-radius: 0;
+  padding: 12px 13px 10px;
+}
+.agent-card:last-child {
+  border-bottom: 0;
+}
+.agent-top {
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.agent-top strong {
+  color: var(--agent-color);
+  font-size: 12px;
+  letter-spacing: 0;
+}
+.agent-top strong::before {
+  content: '> ';
+}
+.agent-top time {
+  color: var(--muted);
+  font-size: 9px;
+}
+.agent-phase {
+  color: var(--accent);
+  font-size: 9px;
+}
+.agent-detail {
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 7px;
+}
+.agent-progress {
+  height: auto;
+  background: none;
+  margin-top: 5px;
+  color: var(--agent-color);
+  font:
+    11px/1.4 Consolas,
+    monospace;
+  letter-spacing: 0.035em;
+  overflow: visible;
+}
+.agent-progress span,
+.agent-progress.determinate span {
+  width: auto;
+  height: auto;
+  opacity: 0.8;
+  background: none;
+  animation: none;
+  transform: none;
+}
+.agent-idle {
+  padding: 13px;
+  font-size: 10px;
+  color: var(--syntax-comment);
+}
+.layout-tools {
+  position: fixed;
+  z-index: 30;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100vw - 24px);
+  padding: 10px 12px;
+  background: var(--panel-bg);
+  border: 1px solid var(--accent);
+  color: var(--text);
+  font-size: 11px;
+}
+.layout-tools span {
+  min-width: 0;
+}
+.layout-tools button {
+  flex-shrink: 0;
+}
+body.layout-edit #liveHud {
+  z-index: 22;
+}
+body.layout-edit .terminal-widget {
+  pointer-events: auto;
+  border: 1px dashed var(--accent);
+  background: var(--panel-bg);
+}
+body.layout-edit .widget-handle {
+  cursor: grab;
+  pointer-events: auto;
+}
+body.layout-edit .widget-grip {
+  display: inline;
+}
+body.layout-edit .dragging {
+  z-index: 2;
+}
+.dragging .widget-handle {
+  cursor: grabbing;
+}
+.threshold-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px 14px;
+  margin: 12px 0;
+}
+.threshold-grid label {
+  color: var(--muted, #7a929b);
+  font-size: 11px;
+  display: grid;
+  gap: 5px;
+}
+.threshold-grid input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  border: 1px solid #284047;
+  border-radius: 0;
+  background: #0c191e;
+  color: #c1d6d6;
+  padding: 5px 7px;
+  font:
+    12px Consolas,
+    'Cascadia Mono',
+    monospace;
+}
+.threshold-grid input:focus {
+  outline: 1px solid #68bab0;
+}
+
+@media (max-width: 560px) {
+  #liveHud {
+    inset: 0;
+    width: auto;
+    top: 0;
+    left: 0;
+  }
+  .terminal-widget {
+    width: 258px;
+  }
+  .agents-widget {
+    width: 280px;
+  }
+  .weather-card {
+    padding: 0 12px 11px;
+  }
+  .weather-card > .widget-handle {
+    margin: 0 -12px 10px;
+  }
+  .weather-main strong {
+    font-size: 24px;
+  }
+  .agent-feed {
+    max-height: 220px;
+    overflow: auto;
+  }
+  .layout-tools {
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .layout-tools span {
+    width: 100%;
+  }
+}

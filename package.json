@@ -1,0 +1,24 @@
+{
+  "name": "ascii-city",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": ["apps/web"],
+  "scripts": {
+    "dev": "npm run dev --workspace @ascii-city/web",
+    "build": "npm run build --workspace @ascii-city/web && node tools/package-preview.mjs",
+    "preview": "npm run preview --workspace @ascii-city/web",
+    "check": "npm run check --workspace @ascii-city/web",
+    "test": "vitest run",
+    "format": "prettier --write apps/web/src apps/web/tests apps/web/index.html",
+    "test:browser": "node tools/browser-check.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "playwright-core": "^1.58.0",
+    "prettier": "^3.7.0",
+    "typescript": "~5.9.3",
+    "vite": "^7.3.0",
+    "vitest": "^4.0.0"
+  }
+}

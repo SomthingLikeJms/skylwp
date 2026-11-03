@@ -1,0 +1,6 @@
+{
+  "identifier": "main",
+  "description": "Local wallpaper window event bridge",
+  "windows": ["city"],
+  "permissions": ["core:default"]
+}

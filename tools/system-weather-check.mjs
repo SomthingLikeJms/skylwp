@@ -1,0 +1,44 @@
+import {chromium} from 'playwright-core';
+import fs from 'node:fs/promises';
+import assert from 'node:assert/strict';
+const root=process.cwd(),out=`${root}/artifacts/system-weather`;
+await fs.mkdir(out,{recursive:true});
+const browser=await chromium.connectOverCDP('http://127.0.0.1:9223');
+const page=browser.contexts().flatMap(c=>c.pages()).find(p=>p.url().includes('tauri.localhost'));
+assert.ok(page);
+const errors=[];page.on('pageerror',e=>errors.push(e.message));
+try {
+  await page.waitForFunction(()=>Boolean(window.asciiCity));
+  const before=await page.evaluate(()=>window.__TAURI__.core.invoke('host_status'));
+  assert.match(before.version,/^0\.(3|4)\./);
+  await page.evaluate(()=>window.__TAURI__.core.invoke('host_command',{command:'interactive'}));
+  await page.locator('#nativeGroup').evaluate(el=>{el.open=true;});
+  await page.locator('#weatherLocationMode').selectOption('system');
+  await page.locator('#weatherCityForm button').click();
+  await page.waitForFunction(async()=>{
+    const s=await window.__TAURI__.core.invoke('host_status');
+    return s.config.weatherCity==='system'&&s.sources.weather?.includes('（系统位置）')&&document.getElementById('weatherCredit').textContent.includes('系统位置')&&document.getElementById('weatherTemp').textContent!=='—';
+  },null,{timeout:45000});
+  const selected=await page.evaluate(()=>window.__TAURI__.core.invoke('host_status'));
+  assert.ok(selected.sources.weather.includes('系统位置'),selected.sources.weather);
+  assert.equal(selected.config.weatherCity,'system');
+  await page.waitForFunction(()=>document.getElementById('weatherCredit').textContent.includes('系统位置')&&document.getElementById('weatherTemp').textContent!=='—');
+  const city=await page.locator('#weatherCityLabel').textContent();
+  const other=before.config.scene==='nyc'?'bund':'nyc';
+  await page.locator(`[data-group=scene] [data-v=${other}]`).click();
+  await page.waitForTimeout(2200);
+  assert.equal(await page.locator('#weatherCityLabel').textContent(),city);
+  assert.equal((await page.evaluate(()=>window.__TAURI__.core.invoke('host_status'))).config.weatherCity,'system');
+  await page.locator(`[data-group=scene] [data-v=${before.config.scene}]`).click();
+  const events=(await page.evaluate(()=>window.asciiCity.export())).trim().split('\n').slice(1).map(line=>JSON.parse(line));
+  const weather=events.filter(e=>e.type==='weather.real');assert.ok(weather.length);
+  assert.ok(weather.every(e=>!('latitude' in e.data)&&!('longitude' in e.data)&&!('lat' in e.data)&&!('lon' in e.data)));
+  assert.deepEqual(errors,[]);
+  const report={version:selected.version,locationSource:'Windows',mode:'system',city,sourceStatus:selected.sources.weather,temperature:await page.locator('#weatherTemp').textContent(),unchangedAcrossSceneSwitch:true,preciseCoordinatesExported:false,errors};
+  await fs.writeFile(`${out}/report.json`,JSON.stringify(report,null,2));
+  await page.screenshot({path:`${out}/settings.png`});
+  await page.evaluate(()=>window.__TAURI__.core.invoke('host_command',{command:'wallpaper'}));
+  await page.waitForTimeout(600);
+  await page.screenshot({path:`${out}/wallpaper.png`});
+  console.log(JSON.stringify(report,null,2));process.exit(0);
+}catch(e){console.error(e);process.exit(1);}

@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "ASCII 城市标签信号",
+  "version": "0.2.0",
+  "description": "仅向本机 ASCII 城市发送标签数量与类别，不发送网址和标题。",
+  "permissions": ["tabs", "storage", "alarms"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "background": { "service_worker": "background.js" },
+  "options_page": "options.html",
+  "action": { "default_title": "配置 ASCII 城市连接" }
+}

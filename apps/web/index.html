@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>ASCII 城市</title>
+  </head>
+  <body class="live">
+    <canvas id="world" aria-label="由本机活动驱动的 ASCII 城市天际线"></canvas>
+    <canvas id="weatherMoon" aria-label="系统城市实况天气 LED 月亮" hidden></canvas>
+    <div id="nogl" hidden>
+      这个浏览器不支持 WebGL2，换用最新版 Chrome 或 Edge 打开即可看到世界。
+    </div>
+
+    <div id="icons-layer" hidden aria-hidden="true">
+      <div class="ic"><i></i><span>此电脑</span></div>
+      <div class="ic"><i></i><span>回收站</span></div>
+      <div class="ic"><i></i><span>文档</span></div>
+      <div class="ic"><i></i><span>项目</span></div>
+      <div class="ic"><i></i><span>下载</span></div>
+      <div class="ic"><i></i><span>截图</span></div>
+    </div>
+
+    <section id="liveHud" aria-label="城市实况" hidden>
+      <div class="weather-card terminal-widget" data-widget="weather">
+        <div class="widget-handle" role="button" aria-label="移动天气组件">
+          <span class="syntax-comment">▪</span><span>城市天气</span
+          ><span class="widget-grip">[拖动]</span>
+        </div>
+        <div class="hud-eyebrow">
+          <span class="live-dot"></span><span id="weatherCityLabel">城市天气</span
+          ><time id="weatherTime"></time>
+        </div>
+        <div class="weather-main">
+          <strong id="weatherTemp">—</strong><span id="weatherCondition">等待在线天气</span
+          ><span id="weatherSymbol" aria-hidden="true">[---]</span>
+        </div>
+        <div id="weatherDetails" class="hud-details">天气连接中</div>
+        <div id="weatherCredit" class="hud-credit">Open-Meteo</div>
+      </div>
+      <div class="terminal-widget agents-widget" data-widget="agents">
+        <div class="widget-handle" role="button" aria-label="移动 Agent 组件">
+          <span class="syntax-comment">▪</span><span>Agent 动态</span
+          ><span class="widget-grip">[拖动]</span>
+        </div>
+        <div id="agentFeed" class="agent-feed" aria-label="Agent 实时活动"></div>
+      </div>
+    </section>
+    <div id="layoutTools" class="layout-tools" hidden>
+      <span>拖动标题栏，方向键微调。位置自动保存。</span><button id="layoutReset">恢复默认</button
+      ><button id="layoutDone">完成</button>
+    </div>
+
+    <aside id="panel" aria-label="世界控制台">
+      <div class="ph">
+        <div class="brand">世界控制台<small>模拟模式，拖动信号看城市回应</small></div>
+        <button class="ghost" id="hideBtn" title="切到壁纸态（H）">收起</button>
+      </div>
+      <details class="group" id="nativeGroup" hidden>
+        <summary class="gh"><b>本机数据</b><span id="hostState">正在连接</span></summary>
+        <label class="check"><input type="checkbox" data-source="system" checked />系统状态</label>
+        <label class="check"
+          ><input type="checkbox" data-source="audio" checked />系统音频，不使用麦克风</label
+        >
+        <label class="check"
+          ><input type="checkbox" data-source="media" checked />播放器曲名与封面配色</label
+        >
+        <label class="check"
+          ><input type="checkbox" data-source="agents" checked />本地 Agent 会话</label
+        >
+        <label class="check"
+          ><input type="checkbox" data-source="browser" checked />浏览器标签计数</label
+        >
+        <label class="check"><input type="checkbox" data-source="weather" checked />在线天气</label>
+        <div class="row wide">
+          <span>位置</span
+          ><select id="weatherLocationMode" aria-label="天气位置来源">
+            <option value="system">系统城市</option>
+            <option value="auto">跟随场景</option>
+            <option value="fixed">固定城市</option>
+          </select>
+        </div>
+        <form id="weatherCityForm" class="city-form">
+          <input
+            id="weatherCity"
+            type="text"
+            maxlength="64"
+            aria-label="固定天气城市"
+            placeholder="固定城市名称"
+          />
+          <button type="submit">应用</button>
+        </form>
+        <div class="map">系统城市使用 Windows 定位，城市名在本地匹配。天气每 10 分钟更新。</div>
+        <label class="check"
+          ><input type="checkbox" id="coveredChk" checked />前台最大化或全屏时暂停</label
+        >
+        <label class="check"><input type="checkbox" id="startupChk" />开机启动</label>
+        <label class="check"
+          ><input type="checkbox" id="desktopFireworksChk" checked />单击桌面空白处放烟花</label
+        >
+        <div id="sourceStatus" class="source-status"></div>
+        <div class="btns">
+          <button id="hostPause">暂停动画</button><button id="hostDesktop">回到桌面</button
+          ><button id="hostExit">退出壁纸</button>
+        </div>
+      </details>
+
+      <div class="group">
+        <div class="gh"><b>城市</b><span>隔着水看天际线</span></div>
+        <div class="row wide">
+          <span>场景</span>
+          <div class="chips" data-group="scene">
+            <button data-v="bund" class="on">外滩</button><button data-v="nyc">曼哈顿</button
+            ><button data-v="hk">维港</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="gh"><b>画面</b><button id="layoutBtn" class="ghost">摆放小组件</button></div>
+        <div class="row wide">
+          <span>氛围</span>
+          <div class="chips" data-group="effects">
+            <button data-v="0">原貌</button><button data-v="0.5">轻量</button
+            ><button data-v="0.85" class="on">数字氛围</button>
+          </div>
+        </div>
+        <div class="map">精细字符纹理、扫描光带和信号流，响应本机活动</div>
+        <div class="row wide">
+          <span>主题</span>
+          <div class="chips" data-group="theme">
+            <button data-v="harbor" class="on">夜港</button><button data-v="phosphor">磷光</button
+            ><button data-v="ink">纸墨</button>
+          </div>
+        </div>
+        <div class="row wide">
+          <span>字格</span>
+          <div class="chips" data-group="density">
+            <button data-v="7">细</button><button data-v="9" class="on">中</button
+            ><button data-v="12">粗</button>
+          </div>
+        </div>
+        <label class="check"><input type="checkbox" id="iconsChk" />叠加桌面图标，检查构图</label>
+        <label class="check"
+          ><input type="checkbox" id="privacyChk" />隐私模式，隐藏任务和曲名</label
+        >
+      </div>
+
+      <div class="group" id="waterGroup">
+        <div class="gh"><b>江面字符</b><span>真实状态的倒影</span></div>
+        <label class="row wide"
+          ><span>样式</span
+          ><select id="waterMode" aria-label="江面字符样式">
+            <option value="binary">01 数值</option>
+            <option value="ascii" selected>状态倒影</option>
+            <option value="mirror">普通倒影</option>
+          </select></label
+        >
+        <label class="row wide"
+          ><span>内容</span
+          ><select id="waterSource" aria-label="江面数据来源">
+            <option value="combined">CPU 和 Agent 任务</option>
+            <option value="cpu">CPU 和内存</option>
+            <option value="agent">Agent 任务</option>
+          </select></label
+        >
+        <div class="row">
+          <span>浓度</span
+          ><input id="waterStrength" type="range" min="0" max="100" value="25" /><output
+            id="waterStrengthO"
+            >25%</output
+          >
+        </div>
+        <div class="map">
+          低亮度显示 CPU、内存和最近一个 Agent 的动作。有任务计划时显示进度，否则显示实际工具次数。
+        </div>
+      </div>
+
+      <form class="group" id="weatherRulesForm">
+        <div class="gh"><b>气候映射</b><span>月亮显示系统城市实况</span></div>
+        <label class="row wide"
+          ><span>城市天气</span
+          ><select id="weatherMode" aria-label="城市气候来源">
+            <option value="load">跟随本机负载</option>
+            <option value="real">跟随实况天气</option>
+          </select></label
+        >
+        <div class="map">
+          月亮以点阵显示实况表情：晴天微笑，下雨流泪，多云困倦，雪天发冷，雷暴惊讶。城市云雨独立响应
+          CPU。
+        </div>
+        <div class="threshold-grid">
+          <label
+            >多云 CPU %<input
+              id="cloudThreshold"
+              type="number"
+              min="0"
+              max="98"
+              step="1"
+              required
+              value="20"
+          /></label>
+          <label
+            >下雨 CPU %<input
+              id="rainThreshold"
+              type="number"
+              min="1"
+              max="99"
+              step="1"
+              required
+              value="45"
+          /></label>
+          <label
+            >雷暴 CPU %<input
+              id="stormThreshold"
+              type="number"
+              min="2"
+              max="100"
+              step="1"
+              required
+              value="70"
+          /></label>
+          <label
+            >起雾 内存 %<input
+              id="fogThreshold"
+              type="number"
+              min="0"
+              max="100"
+              step="1"
+              required
+              value="85"
+          /></label>
+          <label
+            >平滑时间 秒<input
+              id="weatherResponse"
+              type="number"
+              min="1"
+              max="120"
+              step="1"
+              required
+              value="8"
+          /></label>
+          <label
+            >最短保持 秒<input
+              id="weatherHold"
+              type="number"
+              min="0"
+              max="120"
+              step="1"
+              required
+              value="5"
+          /></label>
+        </div>
+        <div class="map" id="climateStatus"></div>
+        <div class="btns">
+          <button type="submit" id="weatherApply">保存阈值</button
+          ><button type="button" id="weatherReset">恢复默认</button>
+        </div>
+      </form>
+
+      <div class="group">
+        <div class="gh"><b>时间</b><span>昼夜与星空</span></div>
+        <div class="row">
+          <span>时刻</span
+          ><input type="range" id="hour" min="0" max="23.99" step="0.01" value="20.5" /><output
+            id="hourO"
+            >20:30</output
+          >
+        </div>
+        <div class="row wide">
+          <span>流速</span>
+          <div class="chips" data-group="flow">
+            <button data-v="stop">静止</button><button data-v="real" class="on">实时</button
+            ><button data-v="fast">300 倍</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="gh"><b>系统</b><span>决定气候</span></div>
+        <div class="row">
+          <span>CPU</span><input type="range" id="cpu" min="0" max="100" value="35" /><output
+            id="cpuO"
+          ></output>
+        </div>
+        <div class="map">升温：天际线被热浪扭曲，夜空泛起暖光</div>
+        <div class="row">
+          <span>内存</span><input type="range" id="mem" min="0" max="100" value="55" /><output
+            id="memO"
+          ></output>
+        </div>
+        <div class="map">吃紧：云层压低，水面起雾；起雾阈值可在气候映射中调整</div>
+        <div class="row">
+          <span>网络</span><input type="range" id="net" min="0" max="100" value="40" /><output
+            id="netO"
+          ></output>
+        </div>
+        <div class="map">繁忙：风浪更大，航班更多，曼哈顿桥上车流变密</div>
+      </div>
+
+      <div class="group">
+        <div class="gh"><b>音乐</b><span>决定节律</span></div>
+        <div class="row wide">
+          <span>播放</span>
+          <div class="chips" data-group="music">
+            <button data-v="off">暂停</button><button data-v="on" class="on">播放中</button>
+          </div>
+        </div>
+        <div class="row">
+          <span>BPM</span><input type="range" id="bpm" min="60" max="180" value="112" /><output
+            id="bpmO"
+          ></output>
+        </div>
+        <div class="row">
+          <span>律动</span
+          ><input type="range" id="intensity" min="0" max="100" value="100" /><output
+            id="intensityO"
+          ></output>
+        </div>
+        <div class="map">夜里的灯光秀：外滩明珠变色，帝国大厦塔冠换色，维港激光扫动</div>
+      </div>
+
+      <div class="group">
+        <div class="gh"><b>Agent</b><span>决定谁在盖楼</span></div>
+        <div class="row">
+          <span>活跃</span><input type="range" id="act" min="0" max="100" value="65" /><output
+            id="actO"
+          ></output>
+        </div>
+        <div class="map">每个会话认领一块地起楼，窗灯随工具活动闪动；任务状态映在江面</div>
+        <label class="row wide"
+          ><span>会话</span
+          ><select id="agentSelect" aria-label="选择 Agent 会话"></select
+        ></label>
+        <div class="btns">
+          <button data-ev="session">新会话</button><button data-ev="pass">测试通过</button
+          ><button data-ev="error">报错</button>
+        </div>
+        <div class="btns">
+          <button data-ev="progress">完成一步</button><button data-ev="await">等待确认</button
+          ><button data-ev="end">结束会话</button>
+        </div>
+        <div class="btns">
+          <button data-ev="read">读文件</button><button data-ev="edit">编辑</button
+          ><button data-ev="run">运行命令</button>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="gh"><b>浏览器</b><span>决定水上的船</span></div>
+        <div class="row">
+          <span>标签</span><input type="range" id="tabs" min="0" max="8" value="5" /><output
+            id="tabsO"
+          ></output>
+        </div>
+        <div class="btns one"><button data-ev="tab">开新标签</button><span></span></div>
+      </div>
+
+      <div class="group">
+        <div class="gh"><b>你</b></div>
+        <label class="check"><input type="checkbox" id="awayChk" />离开电脑，城市熄灯</label>
+      </div>
+
+      <div class="group">
+        <div class="gh"><b>事件流</b><span>本次运行，可导出回放</span></div>
+        <ol id="log"></ol>
+        <div class="btns">
+          <button id="demoBtn">播放演示</button><button id="exportBtn">导出记录</button
+          ><button id="importBtn">导入回放</button>
+        </div>
+        <input type="file" id="importFile" accept=".jsonl,.json,application/json" hidden />
+        <label class="check"
+          ><input type="checkbox" id="includePrivateChk" />导出中包含任务和曲名</label
+        >
+      </div>
+
+      <div class="foot"><span id="perf">启动中</span><span>H 切换，点天空放烟花</span></div>
+    </aside>
+
+    <button id="wake" aria-label="打开世界控制台" title="打开控制台（H）">◇</button>
+    <div id="toast" role="status"></div>
+    <div id="tip" hidden></div>
+    <div id="statusline" role="status" aria-live="off"></div>
+    <div id="timeline" aria-label="本次运行的回放时间轴">
+      <button id="playBtn" class="ghost" title="播放或暂停回放">暂停</button>
+      <output id="timeLabel">00:00</output>
+      <div class="time-track">
+        <canvas id="eventMarks" aria-hidden="true"></canvas
+        ><input
+          type="range"
+          id="timeCursor"
+          min="0"
+          max="0"
+          step="0.1"
+          value="0"
+          aria-label="回放时间"
+        />
+      </div>
+      <button id="liveBtn" class="ghost">回到实时</button>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

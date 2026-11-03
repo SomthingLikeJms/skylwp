@@ -1,0 +1,13 @@
+import { chromium } from 'playwright-core';
+import fs from 'node:fs/promises';
+import assert from 'node:assert/strict';
+const browser = await chromium.connectOverCDP('http://127.0.0.1:9223');
+const page = browser.contexts().flatMap(c=>c.pages()).find(p=>p.url().includes('tauri.localhost'));
+assert.ok(page);
+const recording = await page.evaluate(()=>window.asciiCity.export());
+assert.ok(recording.includes('"type":"desktop.click"'));
+const event = recording.trim().split('\n').map(line=>JSON.parse(line)).filter(e=>e.type==='desktop.click').at(-1);
+await page.screenshot({path:`${process.cwd()}/artifacts/climate-water/native-desktop-firework.png`});
+await fs.writeFile(`${process.cwd()}/artifacts/climate-water/desktop-frontend-receipt.json`,JSON.stringify({event,mode:await page.locator('body').getAttribute('class')},null,2));
+console.log('Native frontend received real desktop click');
+process.exit(0);
