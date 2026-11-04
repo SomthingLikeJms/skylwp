@@ -4,11 +4,21 @@
 
 当前版本 **0.9.3**：完善居民与设施互动，船群关联本机信号，统一楼宇、树木和船体材质，并修复桌面图标遮挡。功能范围与验证记录见 [当前状态](docs/STATUS.md) 和 [验证记录](docs/VALIDATION.md)。
 
-这是源码仓库，依赖、开发工具链、本机数据和 `outputs/` 构建产物不提交到 Git。首次使用请先按下方“开发”说明构建。
+## 下载与使用
 
-构建后双击根目录 `Start.cmd`，或解压生成的 `outputs/AsciiCity-Wallpaper.zip` 后双击 `AsciiCity.exe`。便携版使用现有 WebView2，自动读取本机系统、播放输出、媒体会话和 Agent 记录，并挂在桌面图标下面。双击托盘图标打开控制台，**Esc** 返回桌面；`Stop.cmd` 或托盘菜单可退出。使用说明见 `docs/PORTABLE.md`。
+- [下载 Windows x64 便携版 0.9.3](https://github.com/SomthingLikeJms/skylwp/releases/download/v0.9.3/Skylwp-0.9.3-windows-x64.zip)
+- [下载浏览器演示包](https://github.com/SomthingLikeJms/skylwp/releases/download/v0.9.3/Skylwp-0.9.3-browser-preview.zip)：解压后打开 `Preview.html`，使用模拟信号。
+- [版本说明与 SHA-256 校验文件](https://github.com/SomthingLikeJms/skylwp/releases/tag/v0.9.3)
 
-`Start-Preview.cmd` 和 `outputs/ASCII城市预览.html` 保留为模拟前端预览，便于独立开发；按 **H** 切换交互与壁纸预览。
+Windows 版解压整个文件夹后双击 `AsciiCity.exe`，保留同目录的 DLL。需要 Windows x64 和 [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/)，无需安装 Node.js、Rust 或 Wallpaper Engine；当前实机验证环境为 Windows 11。双击托盘图标打开控制台，**Esc** 返回桌面；`Stop.cmd` 或托盘菜单可退出。升级时先退出旧程序，再用新文件覆盖原目录，保留自己的 `data` 文件夹。完整说明见 [便携版使用说明](docs/PORTABLE.md)。
+
+程序可读取本机系统、播放输出、媒体会话和 Agent 记录，各项采集可在控制台关闭。版本为便携预览版；已知限制和验证范围见版本说明。
+
+依赖、开发工具链、本机数据和 `outputs/` 构建产物不提交到 Git。源码开发与自行构建见下方“开发”；构建后也可使用根目录的 `Start.cmd`、`Start-Preview.cmd` 启动。浏览器演示按 **H** 切换交互与壁纸预览。
+
+## 许可证
+
+项目自有代码采用 [MIT License](LICENSE)。第三方组件与 GeoNames 数据沿用各自许可证，许可文本和归属见 [第三方声明](docs/THIRD-PARTY-NOTICES.txt)。天气服务的使用还须遵守 Open-Meteo 的服务条款。
 
 ## 当前功能
 

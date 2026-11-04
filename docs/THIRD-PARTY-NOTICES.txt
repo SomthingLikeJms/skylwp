@@ -1,4 +1,8 @@
-ASCII City Wallpaper 0.5.0
+Skylwp / ASCII City Wallpaper 0.9.3
+
+Project code: MIT License, copyright (c) 2026 SomthingLikeJms and contributors.
+The full project license is included as LICENSE. It does not replace the
+licenses of third-party code or data listed below.
 
 The portable application uses open-source components including Rust, Tauri,
 Wry, Tao, windows-rs, serde, serde_json, chrono, rand, tiny_http, sysinfo,
@@ -19,9 +23,26 @@ the WebView2 Rust bindings. Microsoft WebView2 terms are available at:
 https://learn.microsoft.com/en-us/legal/microsoft-edge/microsoft-webview2-runtime
 The Evergreen WebView2 runtime is supplied by the user's Windows installation.
 
-Source code and complete dependency license files are available in this
-project's source distribution / local Cargo dependency cache. Development
-toolchains are not part of the portable ZIP.
+The locked Windows dependency graph, original source archive URLs, copyright
+notices and full license texts are included in THIRD-PARTY-LICENSES.txt. This
+inventory includes build-time dependencies as well as runtime dependencies.
+MPL-covered dependency source is unmodified and available at the per-version
+source URLs in that inventory. Rebuild the inventory after dependency updates
+with tools/collect-licenses.mjs and Windows-filtered cargo metadata.
+
+Additional notices in licenses/:
+- Rust-standard-library.html: copyright and license notices shipped with the
+  Rust standard library used for this Windows GNU build.
+- MinGW-w64-runtime.txt: MinGW-w64 runtime copyright and license notices.
+- GCC-runtime-exception-3.1.txt and GPL-3.0.txt: GNU runtime license and its
+  Runtime Library Exception; these apply to the GNU runtime components.
+- Microsoft.WebView2-SDK-LICENSE.txt and Microsoft.WebView2-SDK-NOTICE.txt:
+  unchanged notices from Microsoft.Web.WebView2 SDK 1.0.3800.47 on NuGet,
+  matching the bundled WebView2Loader.dll version.
+- webview2-rs-LICENSE.txt: MIT license of the Rust WebView2 bindings.
+
+Development toolchains and the Evergreen WebView2 runtime are not included
+in the portable ZIP.
 
 Weather data: Open-Meteo (https://open-meteo.com/), CC BY 4.0.
 Documentation: https://open-meteo.com/en/docs

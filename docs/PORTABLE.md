@@ -1,6 +1,10 @@
 # ASCII 城市动态壁纸便携版
 
+官方下载：[GitHub Releases](https://github.com/SomthingLikeJms/skylwp/releases)。选择 Windows x64 便携 ZIP；浏览器演示包只提供模拟画面。
+
 解压整个文件夹后，双击 `AsciiCity.exe` 或 `Start.cmd` 即可启动。程序使用电脑已有的 WebView2，无需安装 Node.js、Rust、Wallpaper Engine 或其他壁纸软件。请将 `WebView2Loader.dll` 与主程序放在同一目录。
+
+升级前先退出旧程序，解压新版本覆盖应用文件，保留原目录的 `data` 文件夹。发布包附有 MIT 许可证、第三方许可声明；`SHA256SUMS.txt` 位于同一发布页面，可用 PowerShell `Get-FileHash 文件名 -Algorithm SHA256` 核对下载文件。
 
 程序挂在桌面图标下面。双击托盘里的城市图标，或者右键选择“打开城市控制台”，可以进入交互模式。Esc 返回桌面。托盘菜单中的“退出壁纸”或 `Stop.cmd` 可停止程序。
 
