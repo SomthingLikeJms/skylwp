@@ -17,6 +17,42 @@ function weatherText(W: World) {
 export function describe(W: World, S: Settings, info: Entity) {
   const sc = W.sc;
   switch (info.kind) {
+    case 'district':
+      return {
+        title: info.layer === 0 ? '远处的城区' : '对岸的街区',
+        lines: ['更远的楼群、屋顶与港口灯火，隔着空气与水面逐渐隐去。'],
+      };
+    case 'resident': {
+      const r = info.ref,
+        a = r.agent >= 0 ? W.agents[r.agent] : undefined;
+      const actions = {
+        walk: '正在前往目的地',
+        queue: '排队等店主招呼',
+        buy: '正在柜台点单',
+        sit: r.cup > 0 ? '坐在长椅上喝咖啡' : '坐在长椅上歇脚',
+        wait: r.goal === 'pier' ? '等下一班渡轮' : '等一个空座位',
+        board: '正在登船',
+        ride: '乘渡轮离开码头',
+        work: '在工作台处理手头的事',
+        watch: W.musicLvl > 0.3 ? '停下来听音乐' : '站在栏杆边看江景',
+        gone: '已经离开',
+      };
+      const signals = {
+        ambient: '城市日常',
+        working: 'Agent 正在工作',
+        thinking: 'Agent 正在思考',
+        awaiting: 'Agent 等你确认',
+        idle: '暂时没有新的 Agent 活动',
+        done: 'Agent 已结束会话或完成明确的计划',
+        error: 'Agent 刚遇到错误',
+      };
+      return {
+        title: a ? `${a.name} 的居民` : '城市居民',
+        lines: [actions[r.activity], a ? signals[r.signal] : '买一杯咖啡，歇一会，再去乘船。'],
+      };
+    }
+    case 'life':
+      return { title: info.ref.title, lines: [info.ref.detail] };
     case 'tower': {
       const T = info.ref;
       if (T.kind === 'mark') {
@@ -51,6 +87,33 @@ export function describe(W: World, S: Settings, info: Entity) {
       return { title: '激光秀', lines: [`跟着音乐节拍扫动，${S.bpm} BPM`] };
     case 'ship': {
       const s = info.ref;
+      const motion = s.leaving ? '信号结束，正在离港' : s.arriving ? '正在驶入港湾' : '泊在江面';
+      if (s.source === 'memory')
+        return {
+          title: '内存货驳',
+          lines: [`内存使用 ${pct(W.sig.mem)}，货箱数量随占用变化`, motion],
+        };
+      if (s.source === 'network')
+        return {
+          title: '网络快艇',
+          lines: [`网络活跃度 ${pct(W.sig.net)}，影响快艇数量与进出港速度`, motion],
+        };
+      if (s.source === 'media')
+        return { title: '音乐游船', lines: ['播放器开启时入港，灯光跟随实际音频频谱', motion] };
+      if (s.source === 'agent') {
+        const a = W.agents[s.agent ?? -1];
+        return {
+          title: `${S.privacy ? 'Agent' : (a?.name ?? 'Agent')} 的工程船`,
+          lines: [
+            a?.state === 'awaiting'
+              ? '正在等待确认，吊机停下'
+              : a?.state === 'working'
+                ? '任务活动时吊机运转，动作随 CPU 调整'
+                : '任务暂歇，吊机停下',
+            motion,
+          ],
+        };
+      }
       return {
         title: `浏览器标签：${CATS[s.cat].name}`,
         lines: [
@@ -59,7 +122,7 @@ export function describe(W: World, S: Settings, info: Entity) {
             : s.arriving
               ? '新开的标签页，船正在驶来'
               : '在水面上漂着',
-          '船窗的颜色代表网页类别',
+          '船型与船窗颜色区分类别，每三个标签增加一艘，最多四艘',
         ],
       };
     }
@@ -110,7 +173,7 @@ export function describe(W: World, S: Settings, info: Entity) {
             ? '普通城市倒影'
             : `${S.waterMode === 'binary' ? '01 二进制' : 'ASCII 状态流'}，来自 CPU、内存和 Agent 任务，内容可在控制台选择`,
           `浪速跟着网络，现在 ${pct(W.sig.net)}`,
-          `水上 ${W.ships.filter((s) => !s.leaving).length} 艘船，对应打开的标签页`,
+          `水上 ${W.ships.filter((s) => !s.leaving).length} 艘信号船，关联浏览器、Agent、内存、网络和播放器`,
         ],
       };
     case 'shore':

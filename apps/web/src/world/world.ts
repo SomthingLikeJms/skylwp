@@ -5,6 +5,8 @@ import { pick, odd } from './math';
 import { fbm1 } from './noise';
 import { SCENES, LM } from '../scenes';
 import { bGen, BUILD } from '../scenes/stamp';
+import { createResidents } from '../systems/residents';
+import { promenadeY } from '../scenes/waterfront';
 export const TONES = [
   [0.35, 0.45, 0.56],
   [0.5, 0.48, 0.42],
@@ -202,6 +204,7 @@ export function createWorld(cols: number, rows: number, seed: number, sceneKey: 
     particles: [],
     agents: [],
     walkers: [],
+    residents: [],
     ships: [],
     planes: [],
     stars: [],
@@ -263,7 +266,7 @@ export function createWorld(cols: number, rows: number, seed: number, sceneKey: 
   };
   W.wy = Math.max(9, Math.round(rows * 0.62));
   W.baseY = W.wy - 2;
-  W.promY = Math.min(rows - 2, Math.max(W.wy + 5, rows - Math.max(4, Math.round(rows * 0.14))));
+  W.promY = promenadeY(rows);
   W.Hmax = Math.max(7, Math.min(W.baseY - 3, Math.round(rows * 0.46)));
   const R = mulberry32(seed * 3 + 5);
   const ns = Math.floor(cols * W.wy * 0.02);
@@ -298,5 +301,6 @@ export function createWorld(cols: number, rows: number, seed: number, sceneKey: 
   }
   W.lampGap = Math.max(14, Math.round(cols * 0.12));
   W.lampOff = Math.round(W.lampGap * 0.45);
+  W.residents = createResidents(W);
   return W;
 }

@@ -1,6 +1,9 @@
 import { DEFAULT_SETTINGS, RULE_VERSION, type EngineConfig } from './replay';
 import { parseEvent, type CityEvent } from './protocol';
 import { validThresholds } from '../systems/climate-config';
+import { checkpointReplacer, parseCheckpoint, privateCheckpoint } from './checkpoint';
+import { retargetResidents } from '../systems/residents';
+import { promenadeY } from '../scenes/waterfront';
 
 export interface Recording {
   config: EngineConfig;
@@ -12,14 +15,18 @@ export function serializeRecording(recording: Recording, includePrivateText = fa
   const config = structuredClone(recording.config);
   config.settings.cursor = null;
   config.settings.privacy = !includePrivateText;
+  if (config.initial) config.initial = privateCheckpoint(config.initial, includePrivateText);
   const lines = [
-    JSON.stringify({
-      v: 1,
-      type: 'recording',
-      rules: RULE_VERSION,
-      ...config,
-      durationMs: recording.durationMs,
-    }),
+    JSON.stringify(
+      {
+        v: 1,
+        type: 'recording',
+        rules: RULE_VERSION,
+        ...config,
+        durationMs: recording.durationMs,
+      },
+      checkpointReplacer,
+    ),
   ];
   for (const input of recording.events) {
     if ((input.at ?? input.ts) > config.epoch + recording.durationMs + 0.0001) continue;
@@ -42,7 +49,10 @@ export function serializeRecording(recording: Recording, includePrivateText = fa
     }
     lines.push(JSON.stringify(event));
   }
-  return lines.join('\n') + '\n';
+  const output = lines.join('\n') + '\n';
+  if (new TextEncoder().encode(output).length > 10 * 1024 * 1024)
+    throw new Error('记录超过 10 MB，请缩短录制窗口');
+  return output;
 }
 
 export function parseRecording(text: string): Recording {
@@ -55,7 +65,14 @@ export function parseRecording(text: string): Recording {
   } catch {
     throw new Error('无法读取记录头');
   }
-  if (!header || header.type !== 'recording' || header.v !== 1 || header.rules !== RULE_VERSION)
+  if (
+    !header ||
+    header.type !== 'recording' ||
+    header.v !== 1 ||
+    ![RULE_VERSION, 'city-v8', 'city-v7', 'city-v6', 'city-v5', 'city-v4'].includes(
+      String(header.rules),
+    )
+  )
     throw new Error('记录规则版本不兼容');
   const { seed, epoch, cols, rows, durationMs, settings } = header;
   const finite = (v: unknown, min: number, max: number): v is number =>
@@ -69,9 +86,69 @@ export function parseRecording(text: string): Recording {
     !finite(rows, 20, 240) ||
     !Number.isInteger(rows) ||
     cols * rows > 80000 ||
-    !finite(durationMs, 0, 86400000)
+    !finite(durationMs, 0, header.initial ? 365 * 86400000 : 86400000)
   )
     throw new Error('记录尺寸或时间范围无效');
+  const clean = parseSettings(settings);
+  const initial =
+    header.initial === undefined
+      ? undefined
+      : parseCheckpoint(
+          header.initial,
+          parseSettings((header.initial as Record<string, unknown> | null)?.settings),
+          { cols, rows, seed },
+          header.rules !== RULE_VERSION,
+        );
+  if (initial && header.rules !== RULE_VERSION && header.rules !== 'city-v8')
+    retargetResidents({
+      cols,
+      rows,
+      promY: promenadeY(rows),
+      sceneKey: initial.settings.scene,
+      residents: initial.state.residents,
+    });
+  if (
+    initial &&
+    (initial.tick * (1000 / 30) > durationMs + 0.001 ||
+      durationMs - initial.tick * (1000 / 30) > 86400000)
+  )
+    throw new Error('检查点时间越界');
+  if (header.audio !== undefined && header.audio !== 'recorded' && header.audio !== 'live-only')
+    throw new Error('音频记录模式无效');
+  const events: CityEvent[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    let event: CityEvent;
+    try {
+      event = parseEvent(JSON.parse(lines[i]));
+    } catch {
+      throw new Error(`第 ${i + 1} 行事件无效`);
+    }
+    const effective = event.at ?? event.ts;
+    if (
+      effective < epoch + (initial?.tick ?? 0) * (1000 / 30) - 0.001 ||
+      effective > epoch + durationMs + 0.001
+    )
+      throw new Error(`第 ${i + 1} 行事件时间越界`);
+    events.push(event);
+  }
+  return {
+    config: {
+      seed,
+      epoch,
+      cols,
+      rows,
+      settings: clean,
+      ...(initial ? { initial } : {}),
+      ...(header.audio ? { audio: header.audio as 'recorded' | 'live-only' } : {}),
+    },
+    events,
+    durationMs,
+  };
+}
+
+function parseSettings(settings: unknown) {
+  const finite = (v: unknown, min: number, max: number): v is number =>
+    typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
   if (!settings || typeof settings !== 'object' || Array.isArray(settings))
     throw new Error('记录设置无效');
   const S = settings as Record<string, unknown>;
@@ -109,18 +186,5 @@ export function parseRecording(text: string): Recording {
   const clean = { ...DEFAULT_SETTINGS };
   for (const key of Object.keys(DEFAULT_SETTINGS) as (keyof typeof DEFAULT_SETTINGS)[])
     if (key !== 'cursor') Object.assign(clean, { [key]: S[key] });
-  const events: CityEvent[] = [];
-  for (let i = 1; i < lines.length; i++) {
-    let event: CityEvent;
-    try {
-      event = parseEvent(JSON.parse(lines[i]));
-    } catch {
-      throw new Error(`第 ${i + 1} 行事件无效`);
-    }
-    const effective = event.at ?? event.ts;
-    if (effective < epoch || effective > epoch + durationMs + 0.001)
-      throw new Error(`第 ${i + 1} 行事件时间越界`);
-    events.push(event);
-  }
-  return { config: { seed, epoch, cols, rows, settings: clean }, events, durationMs };
+  return clean;
 }

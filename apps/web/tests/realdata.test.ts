@@ -99,5 +99,11 @@ test('a real working Agent keeps construction active while the user is idle', ()
   live.advanceTo(10000);
   expect(live.world.away).toBeGreaterThan(0.95);
   expect(live.world.act).toBeGreaterThan(0.45);
-  expect(live.world.particles.some((p) => p.kind === 'spark')).toBe(true);
+  // Sparks have a finite lifetime; inspect a time window rather than one random frame.
+  let emitted = false;
+  for (let ms = 10000; ms <= 12000; ms += 100) {
+    live.advanceTo(ms);
+    emitted ||= live.world.particles.some((p) => p.kind === 'spark');
+  }
+  expect(emitted).toBe(true);
 });

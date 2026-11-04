@@ -4,6 +4,27 @@ export interface WidgetPoint {
   y: number;
 }
 export type WidgetPositions = Record<WidgetId, WidgetPoint>;
+export interface WidgetAppearance {
+  weather: boolean;
+  agents: boolean;
+  opacity: number;
+}
+export const DEFAULT_WIDGET_APPEARANCE: WidgetAppearance = {
+  weather: true,
+  agents: true,
+  opacity: 0.18,
+};
+export function validWidgetAppearance(value: unknown): value is WidgetAppearance {
+  if (!value || typeof value !== 'object') return false;
+  const p = value as WidgetAppearance;
+  return (
+    typeof p.weather === 'boolean' &&
+    typeof p.agents === 'boolean' &&
+    Number.isFinite(p.opacity) &&
+    p.opacity >= 0 &&
+    p.opacity <= 0.8
+  );
+}
 export const DEFAULT_WIDGET_POSITIONS: WidgetPositions = {
   weather: { x: 0.06, y: 0.03 },
   agents: { x: 0.06, y: 0.23 },
@@ -45,6 +66,7 @@ export function widgetPixels(
 export class WidgetLayout {
   editing = false;
   private positions: WidgetPositions = structuredClone(DEFAULT_WIDGET_POSITIONS);
+  private appearance: WidgetAppearance = { ...DEFAULT_WIDGET_APPEARANCE };
   private drag: {
     id: WidgetId;
     pointer: number;
@@ -54,7 +76,7 @@ export class WidgetLayout {
   } | null = null;
   private observer: ResizeObserver;
   private elements: Record<WidgetId, HTMLElement>;
-  constructor(private changed: (positions: WidgetPositions) => void) {
+  constructor(private changed: (positions: WidgetPositions, appearance: WidgetAppearance) => void) {
     this.elements = {
       weather: document.querySelector<HTMLElement>('[data-widget="weather"]')!,
       agents: document.querySelector<HTMLElement>('[data-widget="agents"]')!,
@@ -62,12 +84,27 @@ export class WidgetLayout {
     try {
       const saved = JSON.parse(localStorage.getItem('ascii-city.widgets') ?? 'null');
       if (validWidgetPositions(saved)) this.positions = saved;
+      const appearance = JSON.parse(localStorage.getItem('ascii-city.widget-appearance') ?? 'null');
+      if (validWidgetAppearance(appearance)) this.appearance = appearance;
     } catch {}
     this.observer = new ResizeObserver(() => this.layout());
     for (const id of ['weather', 'agents'] as const) {
       const el = this.elements[id],
         handle = el.querySelector<HTMLElement>('.widget-handle')!;
       this.observer.observe(el);
+      el.querySelector<HTMLButtonElement>('[data-widget-remove]')!.addEventListener('click', () => {
+        this.appearance[id] = false;
+        this.layout();
+        this.save();
+        document.querySelector<HTMLButtonElement>(`[data-widget-toggle="${id}"]`)!.focus();
+      });
+      document
+        .querySelector<HTMLButtonElement>(`[data-widget-toggle="${id}"]`)!
+        .addEventListener('click', () => {
+          this.appearance[id] = !this.appearance[id];
+          this.layout();
+          this.save();
+        });
       handle.tabIndex = -1;
       handle.addEventListener('pointerdown', (event) => {
         if (!this.editing || event.button !== 0) return;
@@ -137,36 +174,57 @@ export class WidgetLayout {
       });
     }
     addEventListener('resize', () => this.layout());
+    const opacity = document.getElementById('widgetOpacity') as HTMLInputElement;
+    opacity.addEventListener('input', () => {
+      this.appearance.opacity = Math.max(0, Math.min(0.8, 1 - Number(opacity.value) / 100));
+      this.layout();
+    });
+    opacity.addEventListener('change', () => this.save());
     this.layout();
   }
   get value(): WidgetPositions {
     return structuredClone(this.positions);
   }
-  set(value: unknown): void {
+  set(value: unknown, appearance?: unknown): void {
     if (validWidgetPositions(value)) this.positions = structuredClone(value);
+    if (validWidgetAppearance(appearance)) this.appearance = { ...appearance };
     this.layout();
   }
   edit(on: boolean): void {
     this.editing = on;
     document.body.classList.toggle('layout-edit', on);
     document.getElementById('layoutTools')!.hidden = !on;
+    document.getElementById('panel')!.inert = on;
     for (const el of Object.values(this.elements))
       el.querySelector<HTMLElement>('.widget-handle')!.tabIndex = on ? 0 : -1;
     this.layout();
+    if (on) document.querySelector<HTMLButtonElement>('[data-widget-toggle]')!.focus();
   }
   reset(): void {
     this.positions = structuredClone(DEFAULT_WIDGET_POSITIONS);
+    this.appearance = { ...DEFAULT_WIDGET_APPEARANCE };
     this.layout();
     this.save();
   }
   private save(): void {
     try {
       localStorage.setItem('ascii-city.widgets', JSON.stringify(this.positions));
+      localStorage.setItem('ascii-city.widget-appearance', JSON.stringify(this.appearance));
     } catch {}
-    this.changed(this.value);
+    this.changed(this.value, { ...this.appearance });
   }
   private layout(): void {
+    document
+      .getElementById('liveHud')!
+      .style.setProperty('--widget-opacity', String(this.appearance.opacity));
+    const transparency = Math.round((1 - this.appearance.opacity) * 100);
+    (document.getElementById('widgetOpacity') as HTMLInputElement).value = String(transparency);
+    document.getElementById('widgetOpacityValue')!.textContent = `${transparency}%`;
     for (const id of ['weather', 'agents'] as const) {
+      this.elements[id].hidden = !this.appearance[id];
+      document
+        .querySelector<HTMLButtonElement>(`[data-widget-toggle="${id}"]`)!
+        .setAttribute('aria-pressed', String(this.appearance[id]));
       const el = this.elements[id],
         pixel = widgetPixels(
           this.positions[id],

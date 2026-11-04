@@ -141,11 +141,12 @@ fn capture(host: &Host) -> Result<(), Box<dyn std::error::Error>> {
     client.initialize_client(
         &format,
         &Direction::Capture,
-        &StreamMode::PollingShared {
+        &StreamMode::EventsShared {
             autoconvert: true,
             buffer_duration_hns: 1_000_000,
         },
     )?;
+    let event = client.set_get_eventhandle()?;
     let reader = client.get_audiocaptureclient()?;
     client.start_stream()?;
     host.status("audio", "已连接，系统输出回环");
@@ -157,9 +158,14 @@ fn capture(host: &Host) -> Result<(), Box<dyn std::error::Error>> {
     let mut periods = VecDeque::<f64>::with_capacity(8);
     let mut energy = [0f32; 240];
     let mut energy_head = 0;
+    let mut energy_at = Instant::now();
     let mut last_playing = false;
     let mut last_packet = Instant::now();
+    let mut pending_peak = 0f32;
+    let mut last_emit = Instant::now() - Duration::from_secs(2);
     while host.0.running.load(Ordering::Relaxed) && host.enabled("audio") {
+        // WASAPI wakes us when packets arrive; an idle output needs no 8 ms poll.
+        let _ = event.wait_for_event(250);
         reader.read_from_device_to_deque(&mut queue)?;
         if queue.len() > 65536 {
             queue.clear();
@@ -182,20 +188,39 @@ fn capture(host: &Host) -> Result<(), Box<dyn std::error::Error>> {
                 spectrum.push(0.);
             }
         }
+        pending_peak = pending_peak.max(peak);
+        let analyze = pending_peak > 0.000001 || last_sound.elapsed() < Duration::from_millis(500);
         if last_frame.elapsed() >= Duration::from_micros(33333) {
             last_frame = Instant::now();
-            let (bands, onset, bins) = spectrum.analyze();
-            if peak > 0.001 || bands.iter().any(|v| *v > 0.025) {
+            let (bands, onset, bins) = if analyze {
+                spectrum.analyze()
+            } else {
+                ([0.; 3], false, [0.; 7])
+            };
+            if pending_peak > 0.001 || bands.iter().any(|v| *v > 0.025) {
                 last_sound = Instant::now();
             }
+            let active = last_sound.elapsed() < Duration::from_millis(500);
+            pending_peak = 0.;
             let playing = last_sound.elapsed() < Duration::from_secs(10);
             if !host.0.media_session.load(Ordering::Relaxed) && playing != last_playing {
                 host.emit("media", "media.state", None, json!({"playing":playing}));
                 last_playing = playing;
             }
-            energy[energy_head] = (bands[0] + bands[1] + bands[2]) / 3.;
-            energy_head = (energy_head + 1) % 240;
-            host.emit("audio","audio.frame",None,json!({"bass":bands[0],"mid":bands[1],"high":bands[2],"onset":onset,"energy8s":energy.iter().sum::<f32>()/240.,"spectrum":bins}));
+            let buckets = (energy_at.elapsed().as_micros() / 33333) as usize;
+            for i in 0..buckets.min(240) {
+                energy[energy_head] = if i + 1 == buckets.min(240) {
+                    (bands[0] + bands[1] + bands[2]) / 3.
+                } else {
+                    0.
+                };
+                energy_head = (energy_head + 1) % 240;
+            }
+            energy_at += Duration::from_micros(33333 * buckets as u64);
+            if active || last_emit.elapsed() >= Duration::from_secs(1) {
+                host.emit("audio","audio.frame",None,json!({"bass":bands[0],"mid":bands[1],"high":bands[2],"onset":onset,"energy8s":energy.iter().sum::<f32>()/240.,"spectrum":bins}));
+                last_emit = Instant::now();
+            }
             if onset && last_onset.elapsed() > Duration::from_millis(200) {
                 let interval = last_onset.elapsed().as_secs_f64();
                 last_onset = Instant::now();
@@ -222,7 +247,6 @@ fn capture(host: &Host) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        std::thread::sleep(Duration::from_millis(8));
     }
     client.stop_stream()?;
     Ok(())

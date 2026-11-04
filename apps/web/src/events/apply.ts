@@ -71,10 +71,13 @@ export function applyEvent(W: World, S: Settings, event: CityEvent): void {
       S.tabs = W.browserTabs.length;
       logEvent(W, `浏览器现在有 ${S.tabs} 个标签`);
       break;
-    case 'presence':
-      S.away = event.data.idleSec >= 300;
-      logEvent(W, S.away ? '你离开了电脑，城市逐渐熄灯' : '你回来了，城市亮起来');
+    case 'presence': {
+      const away = event.data.idleSec >= 300;
+      if (away !== S.away)
+        logEvent(W, away ? '你离开了电脑，城市逐渐熄灯' : '你回来了，城市亮起来');
+      S.away = away;
       break;
+    }
     case 'weather.real':
       W.weather.real = event.data;
       W.weather.realAt = W.t;

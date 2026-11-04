@@ -1,7 +1,7 @@
 import './style.css';
 import './ui/terminal.css';
 import { Renderer } from './engine/renderer';
-import { FramePacer } from './engine/pacer';
+import { LoopScheduler } from './engine/scheduler';
 import { compose } from './compose';
 import { drawTextLayer } from './systems/textlayer';
 import { describe } from './ui/tooltip';
@@ -9,18 +9,11 @@ import { fmtH } from './systems/actions';
 import { WEATHER_NAMES, weatherFromCode } from './systems/weather';
 import { DEFAULT_THRESHOLDS, validThresholds } from './systems/climate-config';
 import { EventBus } from './events/bus';
-import {
-  makeEvent,
-  type EventData,
-  type EventType,
-  type Source,
-  type CityEvent,
-} from './events/protocol';
-import { CityEngine, DEFAULT_SETTINGS, TICK_MS } from './events/replay';
+import { makeEvent, type EventData, type EventType, type Source } from './events/protocol';
+import { CityEngine, DEFAULT_SETTINGS, NATIVE_HISTORY } from './events/replay';
 import { demoEvents, scenarioEvents } from './events/sim/demo';
 import { parseRecording, serializeRecording, type Recording } from './events/log';
 import type { Settings, Theme, World } from './world/types';
-import { SCENES } from './scenes';
 import { WidgetLayout } from './ui/widgets';
 import { WeatherMoon } from './ui/weather-moon';
 import {
@@ -102,6 +95,7 @@ const epoch = query.has('qa') ? 1793611800000 : Date.now();
 let live = new CityEngine(
   { seed: 20261102, epoch, ...geometry, settings: initialSettings },
   isNative ? [] : demoEvents(epoch),
+  NATIVE_HISTORY,
 );
 let replay: CityEngine | null = null;
 let importedDuration: number | null = null;
@@ -117,8 +111,7 @@ let theme = initialSettings.theme,
   privacy = initialSettings.privacy;
 let renderer: Renderer;
 let playing = false,
-  busy = false,
-  panelVisible = interactive;
+  busy = false;
 let simTime = 0,
   replayTime = 0,
   lastFrame = performance.now(),
@@ -137,10 +130,10 @@ let eventSerial = 0,
   seekSerial = 0,
   resizeTimer = 0;
 const bus = new EventBus();
-const pacer = new FramePacer();
-const widgets = new WidgetLayout((positions) => {
+const widgets = new WidgetLayout((positions, appearance) => {
   if (isNative && hostConfig) {
     hostConfig.widgetPositions = positions;
+    hostConfig.widgetAppearance = appearance;
     void invokeHost('host_config', { config: hostConfig }).catch((error) =>
       showToast(String(error)),
     );
@@ -309,7 +302,6 @@ function setMode(on: boolean, fromHost = false): void {
   }
   interactive = on;
   if (!on && widgets.editing) widgets.edit(false);
-  panelVisible = on;
   panel.classList.toggle('hidden', !on);
   element('wake').classList.toggle('show', !on);
   document.body.classList.toggle('live', on);
@@ -318,6 +310,7 @@ function setMode(on: boolean, fromHost = false): void {
   tip.hidden = true;
   pointer = null;
   updateUi();
+  updateLoopRate();
 }
 
 function paint(): void {
@@ -461,7 +454,7 @@ function updateUi(): void {
       .filter((a) => a.state !== 'ended' || a.id >= W.agents.length - 2)
       .map(
         (a) =>
-          `${a.name} ${a.state === 'awaiting' ? '⏸ 等你确认' : a.state === 'ended' ? '✓ 已完成' : `▸ ${a.done}/${a.total || '—'} ${privacy ? '任务详情已隐藏' : a.current}`}`,
+          `${a.name} ${a.state === 'awaiting' ? '⏸ 等你确认' : a.state === 'ended' ? (a.inactive ? '暂停跟踪' : '✓ 已完成') : `▸ ${a.done}/${a.total || '—'} ${privacy ? '任务详情已隐藏' : a.current}`}`,
       )
       .join('    ') +
     `    ${S.music ? (isNative && !live.events.some((e) => e.type === 'audio.beat') ? '♪ 检测节拍中' : `♪ ${Math.round(S.bpm)} BPM`) : '音乐暂停'}    ${WEATHER_NAMES[W.weather.state]}    ${replay ? '回放中' : isNative ? '本机实时' : '模拟模式'}`;
@@ -491,7 +484,8 @@ function updateUi(): void {
         !control.closest('#waterGroup') &&
         !control.closest('#weatherRulesForm'));
   }
-  timeCursor.max = String(Math.max(0, duration() / 1000));
+  timeCursor.min = String(active().historyStartMs / 1000);
+  timeCursor.max = String(Math.max(active().historyStartMs, duration()) / 1000);
   if (document.activeElement !== timeCursor)
     timeCursor.value = String((replay ? replayTime : live.elapsedMs) / 1000);
   element('timeLabel').textContent = formatDuration(replay ? replayTime : live.elapsedMs);
@@ -506,9 +500,10 @@ function drawTimeline(): void {
   if (!context) return;
   c.width = Math.max(1, c.clientWidth * devicePixelRatio);
   c.height = 24;
-  const full = Math.max(1, duration());
+  const start = active().historyStartMs;
+  const full = Math.max(1, duration() - start);
   for (const event of active().events) {
-    const t = (event.at ?? event.ts) - active().config.epoch;
+    const t = (event.at ?? event.ts) - active().config.epoch - start;
     if (t > full) continue;
     const y = event.type.startsWith('agent.')
       ? 1
@@ -529,7 +524,7 @@ async function seek(milliseconds: number): Promise<void> {
   if (!replay) replay = new CityEngine(live.config, live.events);
   playing = false;
   busy = true;
-  replayTime = Math.max(0, Math.min(duration(), milliseconds));
+  replayTime = Math.max(active().historyStartMs, Math.min(duration(), milliseconds));
   const target = replayTime;
   replay.beginSeek(target);
   while (!replay.advanceTo(target, 240)) {
@@ -567,10 +562,7 @@ async function resize(): Promise<void> {
     return;
   }
   const target = live.elapsedMs;
-  const nextLive = new CityEngine(
-    { ...live.config, cols: next.cols, rows: next.rows },
-    live.events,
-  );
+  const nextLive = live.reconfigure(next.cols, next.rows);
   busy = true;
   while (!nextLive.advanceTo(target, 240))
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -666,7 +658,7 @@ function updateLiveCards(W: World, S: Settings): void {
   const key = activeAgents
     .map(
       (a) =>
-        `${a.id}/${a.calls}/${a.state}/${a.phase}/${a.tool}/${a.current}/${a.done}/${Math.floor(W.t - a.lastActive)}/${S.privacy}`,
+        `${a.id}/${a.calls}/${a.state}/${a.phase}/${a.tool}/${a.current}/${a.done}/${Math.floor(W.t - a.lastActive)}/${privacy}`,
     )
     .join('|');
   if (key === lastHudKey && element('agentFeed').childElementCount) return;
@@ -713,7 +705,7 @@ function updateLiveCards(W: World, S: Settings): void {
     const detail = document.createElement('div');
     detail.className = 'agent-detail';
     detail.textContent = a.total
-      ? `${a.done}/${a.total} 步　${S.privacy ? '任务详情已隐藏' : a.current}`
+      ? `${a.done}/${a.total} 步　${privacy ? '任务详情已隐藏' : a.current}`
       : `calls: ${String(a.calls).padStart(3, '0')}  次实际工具活动`;
     const progress = document.createElement('div');
     progress.className = `agent-progress${a.total ? ' determinate' : ''}`;
@@ -838,7 +830,8 @@ element('layoutBtn').addEventListener('click', () => {
 });
 element('layoutDone').addEventListener('click', () => {
   widgets.edit(false);
-  showToast('小组件位置已保存');
+  showToast('小组件设置已保存');
+  element('layoutBtn').focus();
 });
 element('layoutReset').addEventListener('click', () => widgets.reset());
 element('wake').addEventListener('click', () => setMode(true));
@@ -864,30 +857,34 @@ element('demoBtn').addEventListener('click', () => {
   showToast('演示已开始，将依次展示进度、等待、报错与完成');
 });
 element('exportBtn').addEventListener('click', async () => {
-  const content = serializeRecording(
-    currentRecording(),
-    element<HTMLInputElement>('includePrivateChk').checked,
-  );
-  if (isNative) {
-    try {
-      const path = await invokeHost<string>('host_export', { content });
-      showToast(`记录已保存：${path}`);
-    } catch (error) {
-      showToast(String(error));
+  try {
+    const content = serializeRecording(
+      currentRecording(),
+      element<HTMLInputElement>('includePrivateChk').checked,
+    );
+    if (isNative) {
+      try {
+        const path = await invokeHost<string>('host_export', { content });
+        showToast(`记录已保存：${path}`);
+      } catch (error) {
+        showToast(String(error));
+      }
+      return;
     }
-    return;
+    const url = URL.createObjectURL(new Blob([content], { type: 'application/x-ndjson' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'ascii-city-recording.jsonl';
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast(
+      element<HTMLInputElement>('includePrivateChk').checked
+        ? '记录已导出，包含任务和曲名'
+        : '记录已导出，任务和曲名已脱敏',
+    );
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '无法导出记录');
   }
-  const url = URL.createObjectURL(new Blob([content], { type: 'application/x-ndjson' }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = 'ascii-city-recording.jsonl';
-  link.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-  showToast(
-    element<HTMLInputElement>('includePrivateChk').checked
-      ? '记录已导出，包含任务和曲名'
-      : '记录已导出，任务和曲名已脱敏',
-  );
 });
 element('importBtn').addEventListener('click', () =>
   element<HTMLInputElement>('importFile').click(),
@@ -902,7 +899,11 @@ element<HTMLInputElement>('importFile').addEventListener('change', async (event)
     replay = new CityEngine(record.config, record.events);
     importedDuration = record.durationMs;
     await seek(0);
-    showToast('已导入记录，点击播放开始回放');
+    showToast(
+      record.config.audio === 'live-only'
+        ? '已导入最近的记录，实时频谱未录制'
+        : '已导入记录，点击播放开始回放',
+    );
   } catch (error) {
     showToast(error instanceof Error ? error.message : '无法导入记录');
   }
@@ -975,6 +976,7 @@ addEventListener('resize', () => {
 });
 document.addEventListener('visibilitychange', () => {
   lastFrame = performance.now();
+  updateLoopRate();
 });
 
 function showFailure(message: string): void {
@@ -987,21 +989,20 @@ function showFailure(message: string): void {
 }
 
 function loop(now: number): void {
-  requestAnimationFrame(loop);
-  const delta = Math.max(0, Math.min(200, now - lastFrame));
+  const delta = Math.max(0, Math.min(2000, now - lastFrame));
   lastFrame = now;
   if (document.hidden || busy || renderer.lost) return;
   const start = performance.now();
   simTime += delta;
-  live.advanceTo(simTime, 8);
+  live.advanceTo(simTime, hostPaused ? 90 : 8);
   if (replay && playing) {
     replayTime = Math.min(duration(), replayTime + delta);
     replay.advanceTo(replayTime, 8);
     if (replayTime >= duration()) playing = false;
   }
   stepCost += performance.now() - start;
-  const target = interactive ? 30 : hostBattery ? 6 : 12;
-  if (!hostPaused && pacer.shouldPaint(now, target)) {
+  if (hostPaused) stepCost = 0;
+  if (!hostPaused) {
     paint();
   }
   if (now - fpsTime >= 1000) {
@@ -1023,10 +1024,22 @@ function loop(now: number): void {
         rows: live.world.rows,
         rejectedEvents,
         events: live.events.length,
+        historyStartMs: live.historyStartMs,
+        pendingAudioFrames: live.pendingAudioFrames,
         agents: live.world.agents.filter((a) => a.state !== 'ended').length,
       },
     }).catch(() => {});
   }
+}
+const scheduler = new LoopScheduler(loop, {
+  now: () => performance.now(),
+  frame: (callback) => requestAnimationFrame(callback),
+  cancelFrame: (id) => cancelAnimationFrame(id),
+  timer: (callback, delay) => window.setTimeout(callback, delay),
+  cancelTimer: (id) => window.clearTimeout(id),
+});
+function updateLoopRate(): void {
+  scheduler.setRate(document.hidden ? 0 : hostPaused ? 1 : interactive ? 30 : hostBattery ? 6 : 12);
 }
 
 function hostControl(state: HostControl): void {
@@ -1043,6 +1056,7 @@ function hostControl(state: HostControl): void {
   hostPaused = Boolean(state.paused);
   document.body.classList.toggle('host-paused', hostPaused);
   hostBattery = Boolean(state.battery);
+  updateLoopRate();
   if (typeof state.privacy === 'boolean') {
     privacy = state.privacy;
     if (hostConfig) hostConfig.privacy = privacy;
@@ -1057,7 +1071,11 @@ async function initializeHost(): Promise<void> {
   const boot = await connectHost((batch) => {
     for (const original of batch) {
       try {
-        const event = { ...original, ts: live.config.epoch + live.elapsedMs };
+        const delivery =
+          document.hidden || busy
+            ? live.elapsedMs
+            : simTime + Math.max(0, Math.min(2000, performance.now() - lastFrame));
+        const event = { ...original, ts: live.config.epoch + delivery };
         delete event.at;
         bus.publish(event);
       } catch {
@@ -1066,7 +1084,7 @@ async function initializeHost(): Promise<void> {
     }
   }, hostControl);
   hostConfig = boot.config;
-  widgets.set(boot.config.widgetPositions);
+  widgets.set(boot.config.widgetPositions, boot.config.widgetAppearance);
   Object.assign(initialSettings, {
     scene: boot.config.scene,
     theme: boot.config.theme,
@@ -1084,7 +1102,11 @@ async function initializeHost(): Promise<void> {
   density = boot.config.density;
   privacy = boot.config.privacy;
   geometry = dimensions(density);
-  live = new CityEngine({ ...live.config, ...geometry, settings: initialSettings }, []);
+  live = new CityEngine(
+    { ...live.config, ...geometry, settings: initialSettings },
+    [],
+    NATIVE_HISTORY,
+  );
   for (const original of boot.events) {
     try {
       const event = { ...original, ts: epoch };
@@ -1234,7 +1256,7 @@ async function start(): Promise<void> {
     updateUi();
     if (isNative) await invokeHost('host_ready');
     lastFrame = performance.now();
-    requestAnimationFrame(loop);
+    updateLoopRate();
   } catch (error) {
     showFailure(error instanceof Error ? error.message : '城市启动失败');
   }

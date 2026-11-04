@@ -2,6 +2,7 @@ import type { World, Settings } from '../world/types';
 import { hash2 } from '../world/noise';
 import { gi } from '../engine/glyphs';
 import { addLight } from '../world/light';
+import { staticLayers } from './cache';
 
 const BOLT = [0.68, 0.79, 1] as const;
 const RAINBOW = [
@@ -110,11 +111,16 @@ export function skyEffects(W: World, S: Settings, night: number): void {
 export function waterEffects(W: World, S: Settings, night: number): void {
   if (S.effects <= 0) return;
   const { cols, wy, promY, t } = W;
+  const crests = staticLayers(W).crests;
   for (let y = wy; y < promY; y++) {
     const depth = (y - wy) / Math.max(1, promY - wy);
+    const swell = Math.sin(y * 0.65 - t * 0.9) * 1.3;
+    const phase = t * 0.52 + swell,
+      sinPhase = Math.sin(phase),
+      cosPhase = Math.cos(phase);
     for (let x = 0; x < cols; x++) {
       const i = y * cols + x,
-        wave = Math.sin(x * 0.075 + t * 0.52 + Math.sin(y * 0.65 - t * 0.9) * 1.3);
+        wave = crests.at(x, sinPhase, cosPhase);
       const crest =
         Math.max(0, wave - 0.88) * S.effects * (0.3 + night * 0.7) * (0.2 + depth) * 0.28;
       W.br[i] += crest * 0.25;

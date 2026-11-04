@@ -5,10 +5,79 @@ use tauri::{Emitter, Manager};
 use windows::{
     core::{w, Interface, BOOL},
     Win32::{
-        Foundation::{COLORREF, HWND, LPARAM, RECT, WPARAM},
-        UI::WindowsAndMessaging::*,
+        Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM},
+        UI::{
+            Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
+            WindowsAndMessaging::*,
+        },
     },
 };
+
+const DESKTOP_ORDER_GUARD: usize = 0x534b594c;
+
+unsafe fn shared_icons(hwnd: HWND) -> Option<HWND> {
+    let parent = GetParent(hwnd).ok()?;
+    FindWindowExW(Some(parent), None, w!("SHELLDLL_DefView"), None).ok()
+}
+
+unsafe fn below_icons(hwnd: HWND, icons: HWND) -> bool {
+    if GetParent(hwnd).ok() != GetParent(icons).ok() {
+        return false;
+    }
+    let mut previous = GetWindow(hwnd, GW_HWNDPREV).ok();
+    while let Some(window) = previous {
+        if window == icons {
+            return true;
+        }
+        previous = GetWindow(window, GW_HWNDPREV).ok();
+    }
+    false
+}
+
+// The raised Windows 11 desktop shares a parent with the icon view. A later
+// ShowWindow/WebView activation can raise our child even though SetParent is
+// unchanged. Constrain our own position requests, without touching Explorer.
+unsafe extern "system" fn desktop_order_guard(
+    hwnd: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _id: usize,
+    _data: usize,
+) -> LRESULT {
+    if message == WM_NCDESTROY {
+        let _ = RemoveWindowSubclass(hwnd, Some(desktop_order_guard), DESKTOP_ORDER_GUARD);
+    }
+    let result = DefSubclassProc(hwnd, message, wparam, lparam);
+    if message == WM_WINDOWPOSCHANGING && lparam.0 != 0 {
+        let position = &mut *(lparam.0 as *mut WINDOWPOS);
+        if !position.flags.contains(SWP_NOZORDER) {
+            if let Some(icons) = shared_icons(hwnd) {
+                position.hwndInsertAfter = icons;
+            }
+        }
+    }
+    result
+}
+
+unsafe fn protect_icon_order(hwnd: HWND) -> Result<(), String> {
+    if !SetWindowSubclass(hwnd, Some(desktop_order_guard), DESKTOP_ORDER_GUARD, 0).as_bool() {
+        return Err("无法保护桌面图标层级".into());
+    }
+    if let Some(icons) = shared_icons(hwnd) {
+        SetWindowPos(
+            hwnd,
+            Some(icons),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
+        )
+        .map_err(|e| format!("无法将壁纸置于图标下方：{e}"))?;
+    }
+    Ok(())
+}
 
 #[derive(Default)]
 struct Desktop {
@@ -71,6 +140,9 @@ pub fn set_mode(host: &Host, interactive: bool) -> Result<(), String> {
     let hwnd = HWND(raw as *mut _);
     let was_interactive = host.0.interactive.load(Ordering::Relaxed);
     unsafe {
+        // Install/remove the subclass on the owning UI thread. Interactive mode
+        // must be free to become a foreground top-level window again.
+        let _ = RemoveWindowSubclass(hwnd, Some(desktop_order_guard), DESKTOP_ORDER_GUARD);
         if interactive {
             if !was_interactive {
                 let previous = GetForegroundWindow();
@@ -135,6 +207,7 @@ pub fn set_mode(host: &Host, interactive: bool) -> Result<(), String> {
             if desk.raised {
                 SetLayeredWindowAttributes(hwnd, COLORREF(0), 255, LWA_ALPHA)
                     .map_err(|e| e.to_string())?;
+                protect_icon_order(hwnd)?;
             }
             let mut bounds = RECT::default();
             let _ = GetWindowRect(parent, &mut bounds);
@@ -153,7 +226,7 @@ pub fn set_mode(host: &Host, interactive: bool) -> Result<(), String> {
                 y,
                 GetSystemMetrics(SM_CXVIRTUALSCREEN),
                 GetSystemMetrics(SM_CYVIRTUALSCREEN),
-                SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW,
+                SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW,
             )
             .map_err(|e| e.to_string())?;
             host.0.parent.store(desk.parent, Ordering::Relaxed);
@@ -163,6 +236,10 @@ pub fn set_mode(host: &Host, interactive: bool) -> Result<(), String> {
                 if IsWindow(Some(previous)).as_bool() {
                     let _ = SetForegroundWindow(previous);
                 }
+            }
+            // Verify again after showing the child and restoring foreground focus.
+            if desk.raised {
+                protect_icon_order(hwnd)?;
             }
         }
     }
@@ -195,10 +272,14 @@ pub fn set_mode(host: &Host, interactive: bool) -> Result<(), String> {
     Ok(())
 }
 pub fn schedule_mode(host: &Host, interactive: bool) -> Result<(), String> {
+    let request = host.0.mode_request.fetch_add(1, Ordering::Relaxed) + 1;
     let cloned = host.clone();
     host.0
         .app
         .run_on_main_thread(move || {
+            if cloned.0.mode_request.load(Ordering::Relaxed) != request {
+                return;
+            }
             if let Err(error) = set_mode(&cloned, interactive) {
                 cloned.log(&error);
                 cloned.status("wallpaper", error);
@@ -219,17 +300,43 @@ pub fn watchdog(host: Host) {
                 continue;
             }
             unsafe {
+                let request = host.0.mode_request.load(Ordering::Relaxed);
                 let hwnd = HWND(host.0.hwnd.load(Ordering::Relaxed) as *mut _);
                 let parent = HWND(host.0.parent.load(Ordering::Relaxed) as *mut _);
                 let current = (
                     GetSystemMetrics(SM_CXVIRTUALSCREEN),
                     GetSystemMetrics(SM_CYVIRTUALSCREEN),
                 );
-                if !IsWindow(Some(parent)).as_bool()
+                let remount = !IsWindow(Some(parent)).as_bool()
                     || GetParent(hwnd).map(|p| p.0 as isize).unwrap_or(0) != parent.0 as isize
-                    || (size != (0, 0) && size != current)
-                {
-                    let _ = schedule_mode(&host, false);
+                    || (size != (0, 0) && size != current);
+                let order_changed = shared_icons(hwnd)
+                    .map(|icons| !below_icons(hwnd, icons))
+                    .unwrap_or(false);
+                if remount || order_changed {
+                    let recovery = host.clone();
+                    // A recovery detected during SetParent must not overwrite a
+                    // newer user request to open the interactive console.
+                    let _ = host.0.app.run_on_main_thread(move || {
+                        if recovery.0.mode_request.load(Ordering::Relaxed) == request
+                            && !recovery.0.interactive.load(Ordering::Relaxed)
+                        {
+                            let result = if remount {
+                                set_mode(&recovery, false)
+                            } else {
+                                // Explorer can also reorder its own icon view.
+                                // Repair only Z order, not the desktop attachment.
+                                let current =
+                                    HWND(recovery.0.hwnd.load(Ordering::Relaxed) as *mut _);
+                                protect_icon_order(current)
+                            };
+                            if let Err(error) = result {
+                                recovery.log(&error);
+                            } else if order_changed {
+                                recovery.log("Restored wallpaper below desktop icons");
+                            }
+                        }
+                    });
                 }
                 size = current;
             }

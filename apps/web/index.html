@@ -23,9 +23,19 @@
 
     <section id="liveHud" aria-label="城市实况" hidden>
       <div class="weather-card terminal-widget" data-widget="weather">
-        <div class="widget-handle" role="button" aria-label="移动天气组件">
-          <span class="syntax-comment">▪</span><span>城市天气</span
-          ><span class="widget-grip">[拖动]</span>
+        <div class="widget-header">
+          <div class="widget-handle" role="button" aria-label="移动天气组件">
+            <span class="syntax-comment">▪</span><span>城市天气</span
+            ><span class="widget-grip">[拖动]</span>
+          </div>
+          <button
+            class="widget-remove"
+            data-widget-remove="weather"
+            aria-label="移除天气组件"
+            title="移除天气组件，可重新添加"
+          >
+            ×
+          </button>
         </div>
         <div class="hud-eyebrow">
           <span class="live-dot"></span><span id="weatherCityLabel">城市天气</span
@@ -39,16 +49,39 @@
         <div id="weatherCredit" class="hud-credit">Open-Meteo</div>
       </div>
       <div class="terminal-widget agents-widget" data-widget="agents">
-        <div class="widget-handle" role="button" aria-label="移动 Agent 组件">
-          <span class="syntax-comment">▪</span><span>Agent 动态</span
-          ><span class="widget-grip">[拖动]</span>
+        <div class="widget-header">
+          <div class="widget-handle" role="button" aria-label="移动 Agent 组件">
+            <span class="syntax-comment">▪</span><span>Agent 动态</span
+            ><span class="widget-grip">[拖动]</span>
+          </div>
+          <button
+            class="widget-remove"
+            data-widget-remove="agents"
+            aria-label="移除 Agent 组件"
+            title="移除 Agent 组件，可重新添加"
+          >
+            ×
+          </button>
         </div>
         <div id="agentFeed" class="agent-feed" aria-label="Agent 实时活动"></div>
       </div>
     </section>
-    <div id="layoutTools" class="layout-tools" hidden>
-      <span>拖动标题栏，方向键微调。位置自动保存。</span><button id="layoutReset">恢复默认</button
-      ><button id="layoutDone">完成</button>
+    <div id="layoutTools" class="layout-tools" role="region" aria-label="管理小组件" hidden>
+      <div class="layout-caption">
+        <b>小组件</b><span>拖动标题栏移动，× 移除。点击下方名称重新添加。</span>
+      </div>
+      <div class="layout-actions">
+        <button data-widget-toggle="weather" aria-pressed="true">城市天气</button>
+        <button data-widget-toggle="agents" aria-pressed="true">Agent 动态</button>
+        <label class="widget-transparency" for="widgetOpacity"
+          >透明度 <input id="widgetOpacity" type="range" min="20" max="100" value="82" /><output
+            id="widgetOpacityValue"
+            for="widgetOpacity"
+            >82%</output
+          ></label
+        >
+        <button id="layoutReset">恢复默认</button><button id="layoutDone">完成</button>
+      </div>
     </div>
 
     <aside id="panel" aria-label="世界控制台">
@@ -117,7 +150,7 @@
       </div>
 
       <div class="group">
-        <div class="gh"><b>画面</b><button id="layoutBtn" class="ghost">摆放小组件</button></div>
+        <div class="gh"><b>画面</b><button id="layoutBtn" class="ghost">管理小组件</button></div>
         <div class="row wide">
           <span>氛围</span>
           <div class="chips" data-group="effects">

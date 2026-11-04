@@ -3,6 +3,7 @@ pub mod audio;
 pub mod browser;
 pub mod desktop;
 pub mod media;
+mod process_cpu;
 pub mod system;
 pub mod system_location;
 pub mod weather;

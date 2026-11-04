@@ -1,7 +1,7 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`deterministic city > bund: identical frames at 12 and 30 fps > bund at 12.5 seconds 1`] = `"acfe60d4d09b1a07d3a31115b29462429b2368079b12cdab0ded40e3394076b7"`;
+exports[`deterministic city > bund: identical frames at 12 and 30 fps > bund at 12.5 seconds 1`] = `"256fa6c186cf22dd0a357bb78775f94fc4998e38311d52293fcb4061fce88bd7"`;
 
-exports[`deterministic city > hk: identical frames at 12 and 30 fps > hk at 12.5 seconds 1`] = `"9b9f08882600364fc482b634f1169f356b69d16a98bba9e67da62a776a05da33"`;
+exports[`deterministic city > hk: identical frames at 12 and 30 fps > hk at 12.5 seconds 1`] = `"8f325046a41f5f1a4b8ea85da00944e01417cd1a5de64b29867616c25d73db33"`;
 
-exports[`deterministic city > nyc: identical frames at 12 and 30 fps > nyc at 12.5 seconds 1`] = `"f1cfbbc5977adbbb7915c095ee7e69d89389fa09f303df0d1547ae1e686618be"`;
+exports[`deterministic city > nyc: identical frames at 12 and 30 fps > nyc at 12.5 seconds 1`] = `"2e416a5c7dde7d5d6f611a73db7f810074160a905f53ef53af47e6e5eaf7d825"`;

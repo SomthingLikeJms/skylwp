@@ -10,7 +10,9 @@ export type Color = readonly number[];
 export type SceneKey = 'bund' | 'nyc' | 'hk';
 export type Theme = 'harbor' | 'phosphor' | 'ink';
 export type Roof = 'flat' | 'crown' | 'spire' | 'setback' | 'slant' | 'water' | 'pyramid';
-export type BoatKind = 'cruise' | 'ferry' | 'hk' | 'junk';
+export type BoatKind =
+  'cruise' | 'ferry' | 'hk' | 'junk' | 'sail' | 'launch' | 'workboat' | 'cargo' | 'music';
+export type ShipSource = 'browser' | 'agent' | 'memory' | 'network' | 'media';
 export interface SceneConfig {
   name: string;
   water: string;
@@ -85,6 +87,7 @@ export interface Agent {
   toolProgress: number;
   lastActive: number;
   phase: 'thinking' | 'responding' | 'working';
+  inactive?: boolean;
 }
 export interface Walker {
   agent: number;
@@ -96,8 +99,29 @@ export interface Walker {
   run: number;
   dir: number;
 }
+export type ResidentGoal = 'shop' | 'bench' | 'pier' | 'work' | 'view';
+export type ResidentActivity =
+  'walk' | 'queue' | 'buy' | 'sit' | 'wait' | 'board' | 'ride' | 'work' | 'watch' | 'gone';
+export type ResidentSignal =
+  'ambient' | 'working' | 'thinking' | 'awaiting' | 'idle' | 'done' | 'error';
+export interface Resident {
+  id: number;
+  agent: number;
+  x: number;
+  y: number;
+  goal: ResidentGoal;
+  activity: ResidentActivity;
+  signal: ResidentSignal;
+  timer: number;
+  cup: number;
+  cycle: number;
+  slot: number;
+  trip: number;
+}
 export interface Ship {
   tabId: string;
+  source?: ShipSource;
+  agent?: number;
   x: number;
   tx: number;
   minX: number;
@@ -152,6 +176,9 @@ export type StaticEntity =
   | 'sun';
 export type Entity =
   | { kind: StaticEntity }
+  | { kind: 'life'; ref: import('../compose/life').LifeDetail }
+  | { kind: 'resident'; ref: Resident }
+  | { kind: 'district'; layer: number }
   | { kind: 'tower'; ref: Tower }
   | { kind: 'ship'; ref: Ship }
   | { kind: 'walker'; ref: Walker };
@@ -254,6 +281,7 @@ export interface World extends Grid {
   particles: Particle[];
   agents: Agent[];
   walkers: Walker[];
+  residents: Resident[];
   ships: Ship[];
   planes: Plane[];
   stars: Star[];

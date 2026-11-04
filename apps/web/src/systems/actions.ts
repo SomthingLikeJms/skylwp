@@ -1,6 +1,8 @@
-import type { World, Agent, Tower, Particle, Color } from '../world/types';
+import type { World, Agent, Tower, Particle, Color, BoatKind, ShipSource } from '../world/types';
 import { AGENT_DEFS, CATS } from '../scenes';
 import { mix3 } from '../world/math';
+import { vesselArt } from '../scenes/vessels';
+import { LIFE_SCENES } from '../scenes/life';
 export function fmtH(h: number) {
   const m = Math.floor((((h % 24) + 24) % 24) * 60);
   return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
@@ -74,7 +76,25 @@ export function addAgent(W: World) {
     });
   return a;
 }
-export function spawnShip(W: World, docked: boolean) {
+export interface ShipRequest {
+  tabId: string;
+  source: ShipSource;
+  kind: BoatKind;
+  cat: number;
+  agent?: number;
+}
+export function spawnShip(W: World, docked: boolean, request?: ShipRequest) {
+  if (W.ships.length >= 14) return false;
+  if (!request) {
+    const tab = W.browserTabs.find((tab) => !W.ships.some((s) => !s.leaving && s.tabId === tab.id));
+    if (!tab) return false;
+    request = {
+      tabId: tab.id,
+      source: 'browser',
+      kind: ['sail', 'launch', 'junk'][W.ships.length % 3] as BoatKind,
+      cat: tab.cat,
+    };
+  }
   const top = W.wy + 1,
     bot = W.promY - 3,
     span_ = bot - top;
@@ -82,22 +102,49 @@ export function spawnShip(W: World, docked: boolean) {
   for (let tries = 0; tries < 24; tries++) {
     const y = top + Math.floor(W.rng.next() * span_);
     const far = y - W.wy < (W.promY - W.wy) * 0.35;
-    const hgt = far ? 2 : 3,
-      wid = far ? 3 : 7;
-    if (y + hgt > W.promY - 1) continue;
-    if (W.bridge && y <= W.bridge.deckY + 1 && y + hgt >= W.bridge.deckY - 1) continue;
-    if (W.ships.some((o) => !o.leaving && Math.abs(o.y - y) < (far ? 2 : 3))) continue;
+    const kind = request.kind,
+      shape = vesselArt(kind, far),
+      hgt = shape.height,
+      wid = shape.width;
+    // Keep the entire front navigation lane clear, including the ferry's approach route.
+    if (y + hgt > W.promY - vesselArt(W.sc.boat, false).height - 2) continue;
     const minX = 2,
       maxX = W.cols - wid - 2;
     if (maxX - minX < 1) continue;
     const tx = minX + W.rng.next() * (maxX - minX);
-    const kind = W.sc.boat === 'hk' && W.rng.next() < 0.35 ? 'junk' : W.sc.boat;
-    const tab = W.browserTabs.find(
-      (tab) => !W.ships.some((ship) => !ship.leaving && ship.tabId === tab.id),
-    );
-    if (!tab) return false;
+    if (
+      W.bridge &&
+      tx <= W.bridge.x1 + 2 &&
+      y <= W.bridge.deckY + 1 &&
+      y + hgt >= W.bridge.deckY - 1
+    )
+      continue;
+    // Keep the passenger landing clear; tab boats use the other river berths.
+    const pierX = Math.round(LIFE_SCENES[W.sceneKey].pier * W.cols),
+      ferryWidth = vesselArt(W.sc.boat, false).width;
+    if (
+      y + hgt >= W.promY - 9 &&
+      tx < pierX + ferryWidth / 2 + 4 &&
+      tx + wid > pierX - ferryWidth / 2 - 4
+    )
+      continue;
+    if (
+      W.ships.some((o) => {
+        const other = vesselArt(o.kind, o.far);
+        return (
+          !o.leaving &&
+          y < o.y + other.height + 1 &&
+          y + hgt + 1 > o.y &&
+          tx < o.tx + other.width + 4 &&
+          tx + wid + 4 > o.tx
+        );
+      })
+    )
+      continue;
     W.ships.push({
-      tabId: tab.id,
+      tabId: request.tabId,
+      source: request.source,
+      ...(request.agent !== undefined ? { agent: request.agent } : {}),
       x: docked ? tx : W.cols + 1,
       tx,
       minX,
@@ -105,7 +152,7 @@ export function spawnShip(W: World, docked: boolean) {
       y,
       far,
       kind,
-      cat: tab.cat,
+      cat: request.cat,
       ph: W.rng.next() * 6,
       arriving: !docked,
       leaving: false,

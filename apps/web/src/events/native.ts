@@ -1,5 +1,5 @@
 import type { CityEvent } from './protocol';
-import type { WidgetPositions } from '../ui/widgets';
+import type { WidgetPositions, WidgetAppearance } from '../ui/widgets';
 import type {
   WeatherThresholds,
   WeatherMode,
@@ -23,6 +23,7 @@ export interface HostConfig {
   weatherMode: WeatherMode;
   weatherThresholds: WeatherThresholds;
   widgetPositions: WidgetPositions;
+  widgetAppearance: WidgetAppearance;
   privacy: boolean;
   pauseWhenCovered: boolean;
   scene: 'bund' | 'nyc' | 'hk';

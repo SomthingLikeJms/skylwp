@@ -1,8 +1,11 @@
 import type { World, Settings, Particle } from './types';
 import { clamp, smooth } from './math';
 import { bGen } from '../scenes/stamp';
-import { assignSite, spawnShip, logEvent, burst } from '../systems/actions';
+import { assignSite, logEvent, burst } from '../systems/actions';
 import { stepWeather } from '../systems/weather';
+import { audioIsFresh } from '../systems/audio';
+import { stepFleet } from '../systems/fleet';
+import { stepResidents } from '../systems/residents';
 export function stepWorld(W: World, S: Settings, dt: number) {
   W.tick++;
   W.t = W.tick / 30;
@@ -16,7 +19,7 @@ export function stepWorld(W: World, S: Settings, dt: number) {
   g.mem += (S.mem - g.mem) * k;
   g.net += (S.net - g.net) * k;
   if (S.music) W.beatPh += (dt * S.bpm) / 60;
-  const audioFresh = W.t - W.audio.lastFrame < 1;
+  const audioFresh = audioIsFresh(W);
   W.musicLvl +=
     ((S.music && (!audioFresh || W.t - W.audio.lastAudible < 10) ? 1 : 0) - W.musicLvl) *
     Math.min(1, dt * 0.7);
@@ -25,8 +28,7 @@ export function stepWorld(W: World, S: Settings, dt: number) {
     W.audio.levels[i] +=
       (target - W.audio.levels[i]) * Math.min(1, dt / (target > W.audio.levels[i] ? 0.12 : 0.4));
   }
-  W.beatEnv =
-    (W.t - W.audio.lastFrame < 1 ? W.audio.bass : Math.exp(-(W.beatPh % 1) * 5)) * W.musicLvl;
+  W.beatEnv = (audioFresh ? W.audio.bass : Math.exp(-(W.beatPh % 1) * 5)) * W.musicLvl;
   stepWeather(W, dt, S);
   W.away += ((S.away ? 1 : 0) - W.away) * Math.min(1, dt * 0.6);
   const realWind = W.weather.usesReal ? W.weather.real?.windKph : undefined;
@@ -165,31 +167,8 @@ export function stepWorld(W: World, S: Settings, dt: number) {
       w.dir = Math.sign(d);
     }
   }
-  // ships
-  const want = Math.min(8, W.browserTabs.length);
-  let alive = 0;
-  W.shipCool -= dt;
-  for (const ship of W.ships) {
-    const tab = W.browserTabs.find((tab) => tab.id === ship.tabId);
-    if (!tab) ship.leaving = true;
-    else ship.cat = tab.cat;
-    if (!ship.leaving) alive++;
-  }
-  if (alive < want && W.shipCool <= 0) {
-    spawnShip(W, false);
-    W.shipCool = 0.8;
-  }
-  for (const s of W.ships) {
-    if (s.leaving) s.x += dt * 5;
-    else if (s.arriving) {
-      s.x -= dt * 6;
-      if (s.x <= s.tx) {
-        s.x = s.tx;
-        s.arriving = false;
-      }
-    } else s.x = clamp(s.x + Math.sin(t * 0.12 + s.ph) * dt * 0.3, s.minX, s.maxX);
-  }
-  W.ships = W.ships.filter((s) => !(s.leaving && s.x > W.cols + 2));
+  stepResidents(W, dt);
+  stepFleet(W, S, dt);
   // planes, more when the network is busy
   if (W.planes.length < 4 && W.rng.next() < dt * (0.015 + g.net * 0.12)) {
     const dir = W.rng.next() < 0.5 ? 1 : -1;

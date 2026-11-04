@@ -6,7 +6,7 @@ use std::{
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     sync::atomic::Ordering,
-    time::{Duration, SystemTime},
+    time::{Duration, Instant, SystemTime},
 };
 
 #[derive(Clone, Debug)]
@@ -42,7 +42,7 @@ impl Parser {
             out.push(AgentSignal {
                 kind: "agent.session",
                 session: self.session.clone(),
-                data: json!({"state":"end","name":self.name()}),
+                data: inactive_end(self.name()),
             });
         }
         let turn = if turn == "active" {
@@ -81,9 +81,14 @@ impl Parser {
                         if kind == "turn_aborted" {
                             out.push(self.signal("agent.error", json!({})));
                         }
-                        out.push(
-                            self.signal("agent.session", json!({"state":"end","name":self.name()})),
-                        );
+                        out.push(self.signal(
+                            "agent.session",
+                            if kind == "turn_aborted" {
+                                inactive_end(self.name())
+                            } else {
+                                json!({"state":"end","name":self.name()})
+                            },
+                        ));
                         self.active = false;
                     }
                 }
@@ -413,13 +418,34 @@ struct Tail {
     pending: Vec<u8>,
     parser: Parser,
     last_seen: i64,
+    touched: Instant,
+}
+fn needs_read(length: u64, offset: u64) -> bool {
+    length != offset
+}
+fn inactive_end(name: &str) -> Value {
+    json!({"state":"end","name":name,"reason":"inactive"})
 }
 fn collect_files(home: &Path) -> Vec<(PathBuf, &'static str)> {
     let mut paths = Vec::new();
     let sessions = home.join(".codex/sessions");
-    for days in 0..2 {
-        let date = chrono::Local::now().date_naive() - chrono::Duration::days(days);
-        let dir = sessions.join(date.format("%Y/%m/%d").to_string());
+    // A resumed chat continues writing to the directory of its creation date.
+    // Discover only the three known date-directory levels; never read log bodies here.
+    let mut directories = vec![sessions];
+    for _ in 0..3 {
+        let mut next = Vec::new();
+        for dir in directories {
+            if let Ok(entries) = fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                        next.push(entry.path());
+                    }
+                }
+            }
+        }
+        directories = next;
+    }
+    for dir in directories {
         if let Ok(files) = fs::read_dir(dir) {
             for file in files.flatten() {
                 if file.path().extension().and_then(|x| x.to_str()) == Some("jsonl") {
@@ -440,15 +466,14 @@ fn collect_files(home: &Path) -> Vec<(PathBuf, &'static str)> {
         }
     }
     // Windows may retain an open log's old mtime. Check record timestamps below.
-    paths.sort_by_key(|(p, _)| {
+    paths.sort_by_cached_key(|(p, _)| {
         std::cmp::Reverse(
             p.metadata()
                 .and_then(|m| m.modified())
                 .unwrap_or(SystemTime::UNIX_EPOCH),
         )
     });
-    // Existing open files retain stale mtimes on Windows. Follow today's logs
-    // even when many newer, already finished chats exist.
+    // Cache each metadata lookup once and bound the files followed by the tailer.
     paths.truncate(128);
     paths
 }
@@ -456,6 +481,8 @@ fn collect_files(home: &Path) -> Vec<(PathBuf, &'static str)> {
 pub fn run(host: Host) {
     let home = PathBuf::from(std::env::var_os("USERPROFILE").unwrap_or_default());
     let mut tails = HashMap::<PathBuf, Tail>::new();
+    let mut files = Vec::new();
+    let mut next_discovery = Instant::now();
     while host.0.running.load(Ordering::Relaxed) {
         if !host.enabled("agents") {
             for tail in tails.values_mut().filter(|t| t.parser.active) {
@@ -463,23 +490,41 @@ pub fn run(host: Host) {
                     tail.parser.source,
                     "agent.session",
                     Some(&tail.parser.session),
-                    json!({"state":"end","name":tail.parser.name()}),
+                    inactive_end(tail.parser.name()),
                 );
                 tail.parser.active = false;
             }
             host.status("agents", "已关闭");
+            tails.clear();
+            files.clear();
+            next_discovery = Instant::now();
             std::thread::sleep(Duration::from_secs(2));
             continue;
         }
-        let files = collect_files(&home);
-        for (path, source) in files {
-            let Ok(mut file) = File::open(&path) else {
+        if Instant::now() >= next_discovery {
+            files = collect_files(&home);
+            // Keep already active old logs even if Windows retains a stale mtime.
+            for (path, tail) in &tails {
+                if tail.parser.active && !files.iter().any(|(p, _)| p == path) {
+                    files.push((path.clone(), tail.parser.source));
+                }
+            }
+            files.sort_by_key(|(path, _)| !tails.get(path).is_some_and(|t| t.parser.active));
+            files.truncate(128);
+            next_discovery = Instant::now() + Duration::from_secs(10);
+        }
+        for (path, source) in &files {
+            let source = *source;
+            let Ok(metadata) = fs::metadata(path) else {
                 continue;
             };
-            let Ok(metadata) = file.metadata() else {
+            let new = !tails.contains_key(path);
+            if !new && !needs_read(metadata.len(), tails[path].offset) {
+                continue;
+            }
+            let Ok(mut file) = File::open(path) else {
                 continue;
             };
-            let new = !tails.contains_key(&path);
             if new {
                 let stem = path.file_stem().unwrap_or_default().to_string_lossy();
                 let base = if source == "codex" {
@@ -500,10 +545,12 @@ pub fn run(host: Host) {
                         pending: Vec::new(),
                         parser: Parser::new(base, source),
                         last_seen: 0,
+                        touched: Instant::now(),
                     },
                 );
             }
-            let tail = tails.get_mut(&path).unwrap();
+            let tail = tails.get_mut(path).unwrap();
+            tail.touched = Instant::now();
             if metadata.len() < tail.offset {
                 tail.offset = 0;
                 tail.pending.clear();
@@ -605,9 +652,38 @@ pub fn run(host: Host) {
                 tail.parser.source,
                 "agent.session",
                 Some(&tail.parser.session),
-                json!({"state":"end","name":tail.parser.name()}),
+                inactive_end(tail.parser.name()),
             );
             tail.parser.active = false;
+        }
+        // Inactive logs that disappeared from discovery do not stay in memory.
+        let discovered: HashSet<&PathBuf> = files.iter().map(|(path, _)| path).collect();
+        tails.retain(|path, tail| {
+            tail.parser.active
+                || (discovered.contains(path) && tail.touched.elapsed() < Duration::from_secs(1200))
+        });
+        // Keep even abandoned active cursors bounded across discovery generations.
+        if tails.len() > 128 {
+            let mut stale: Vec<_> = tails
+                .iter()
+                .map(|(p, t)| (p.clone(), t.parser.active, t.touched))
+                .collect();
+            stale.sort_by_key(|(_, active, time)| (*active, *time));
+            for (path, _, _) in stale {
+                if tails.len() <= 128 {
+                    break;
+                }
+                if let Some(tail) = tails.remove(&path) {
+                    if tail.parser.active {
+                        host.emit(
+                            tail.parser.source,
+                            "agent.session",
+                            Some(&tail.parser.session),
+                            inactive_end(tail.parser.name()),
+                        );
+                    }
+                }
+            }
         }
         std::thread::sleep(Duration::from_secs(2));
     }
@@ -616,6 +692,45 @@ pub fn run(host: Host) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn resumed_chats_are_discovered_in_old_date_directories() {
+        let root =
+            std::env::temp_dir().join(format!("skylwp-agent-discovery-{}", std::process::id()));
+        let old = root.join(".codex/sessions/2020/01/02");
+        fs::create_dir_all(&old).unwrap();
+        let log = old.join("resumed.jsonl");
+        fs::write(&log, b"{}\n").unwrap();
+        let files = collect_files(&root);
+        assert_eq!(files, vec![(log.clone(), "codex")]);
+        fs::remove_file(log).unwrap();
+        // Only the exact directories created by this test are removed, non-recursively.
+        for dir in [
+            &old,
+            &old.parent().unwrap().to_path_buf(),
+            &old.parent().unwrap().parent().unwrap().to_path_buf(),
+            &root.join(".codex/sessions"),
+            &root.join(".codex"),
+            &root,
+        ] {
+            fs::remove_dir(dir).unwrap();
+        }
+    }
+    #[test]
+    fn aborted_or_replaced_turns_are_not_reported_as_task_completion() {
+        let mut p = Parser::new("test".into(), "codex");
+        p.parse(&json!({"type":"event_msg","payload":{"type":"task_started","turn_id":"a"}}));
+        let replaced =
+            p.parse(&json!({"type":"event_msg","payload":{"type":"task_started","turn_id":"b"}}));
+        assert_eq!(replaced[0].data["reason"], "inactive");
+        let aborted = p.parse(&json!({"type":"event_msg","payload":{"type":"turn_aborted"}}));
+        assert_eq!(aborted.last().unwrap().data["reason"], "inactive");
+    }
+    #[test]
+    fn unchanged_files_are_not_opened_and_rotation_is_detected() {
+        assert!(!needs_read(100, 100));
+        assert!(needs_read(101, 100));
+        assert!(needs_read(0, 100));
+    }
     #[test]
     fn codex_plan_has_real_steps_not_tool_counts() {
         let mut p = Parser::new("test".into(), "codex");

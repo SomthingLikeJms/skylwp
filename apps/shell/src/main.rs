@@ -50,6 +50,8 @@ pub fn update_config(host: &Host, config: Config) -> Result<(), String> {
         || !["load", "real"].contains(&config.weather_mode.as_str())
         || !config.weather_thresholds.valid()
         || !config.widget_positions.valid()
+        || !config.widget_appearance.opacity.is_finite()
+        || !(0.0..=0.8).contains(&config.widget_appearance.opacity)
         || config.weather_city.is_empty()
         || config.weather_city.chars().count() > 64
         || config.weather_city.chars().any(char::is_control)
@@ -72,7 +74,7 @@ fn host_status(host: tauri::State<'_, Host>) -> Value {
 }
 #[tauri::command]
 fn host_export(host: tauri::State<'_, Host>, content: String) -> Result<String, String> {
-    if content.len() > 20 * 1024 * 1024 {
+    if content.len() > 10 * 1024 * 1024 {
         return Err("记录太大".into());
     }
     let dir = host.0.data_dir.join("exports");

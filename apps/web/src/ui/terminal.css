@@ -119,8 +119,13 @@ button:focus-visible,
   width: auto;
   height: auto;
   z-index: 3;
+  --widget-surface: 7 14 22;
+  --muted: #c0ced6;
+  --syntax-comment: #a4bac5;
+  --text: #e4edf2;
+  --panel-line: rgba(216, 237, 246, 0.13);
   color: var(--text);
-  text-shadow: none;
+  text-shadow: 0 1px 3px rgba(0, 8, 16, 0.9);
   pointer-events: none;
   font-family: Consolas, 'Cascadia Mono', 'Microsoft YaHei', monospace;
 }
@@ -129,7 +134,7 @@ button:focus-visible,
   width: 284px;
   max-width: calc(100vw - 24px);
   border: 1px solid var(--panel-line);
-  background: var(--terminal-bg);
+  background: rgb(var(--widget-surface) / var(--widget-opacity, 0.18));
   border-radius: 0;
   box-shadow: none;
   backdrop-filter: none;
@@ -145,18 +150,46 @@ button:focus-visible,
   border-right: 1px solid var(--accent);
   border-bottom: 1px solid var(--accent);
   pointer-events: none;
+  opacity: 0.5;
+}
+.terminal-widget[hidden] {
+  display: none;
+}
+body[data-visual-theme='ink'] #liveHud {
+  --widget-surface: 243 243 228;
+  --text: #202e2a;
+  --muted: #33453c;
+  --syntax-comment: #435449;
+  --panel-line: rgba(44, 68, 56, 0.18);
+  text-shadow: 0 1px 3px rgba(255, 255, 241, 0.8);
+}
+body[data-visual-theme='phosphor'] #liveHud {
+  --widget-surface: 4 16 10;
+}
+body[data-visual-theme='ink'] .agent-top strong,
+body[data-visual-theme='ink'] .agent-progress {
+  color: var(--accent);
+}
+.widget-header {
+  display: flex;
+  border-bottom: 1px solid var(--panel-line);
+}
+.widget-remove {
+  display: none;
 }
 .weather-card {
   padding: 0 14px 13px;
 }
 .widget-handle {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 7px;
   min-height: 29px;
   padding: 5px 11px;
-  border-bottom: 1px solid var(--panel-line);
-  background: rgba(116, 166, 184, 0.045);
+  border: 0;
+  background: transparent;
   color: var(--syntax-key);
   font:
     11px Consolas,
@@ -166,7 +199,7 @@ button:focus-visible,
   touch-action: none;
   user-select: none;
 }
-.weather-card > .widget-handle {
+.weather-card > .widget-header {
   margin: 0 -14px 12px;
 }
 .syntax-comment {
@@ -328,14 +361,13 @@ button:focus-visible,
 .layout-tools {
   position: fixed;
   z-index: 30;
-  top: 14px;
+  bottom: 24px;
   left: 50%;
   transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  display: grid;
+  gap: 14px;
   max-width: calc(100vw - 24px);
-  padding: 10px 12px;
+  padding: 16px 18px;
   background: var(--panel-bg);
   border: 1px solid var(--accent);
   color: var(--text);
@@ -343,6 +375,71 @@ button:focus-visible,
 }
 .layout-tools span {
   min-width: 0;
+}
+.layout-caption {
+  display: flex;
+  gap: 14px;
+  align-items: baseline;
+}
+.layout-caption b {
+  color: var(--accent);
+  white-space: nowrap;
+}
+.layout-caption span {
+  color: var(--muted);
+  line-height: 1.6;
+}
+.layout-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.layout-tools button {
+  min-height: 36px;
+  padding: 6px 12px;
+  font: inherit;
+  background: var(--chip);
+  color: var(--text);
+  border: 1px solid var(--panel-line);
+  cursor: pointer;
+}
+.layout-tools button:hover {
+  border-color: var(--accent);
+}
+.layout-tools [aria-pressed='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.layout-tools [data-widget-toggle]::before {
+  content: '+ ';
+}
+.layout-tools [aria-pressed='true']::before {
+  content: '− ';
+}
+#layoutDone {
+  background: var(--accent);
+  color: #091813;
+  border-color: var(--accent);
+}
+.widget-transparency {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.widget-transparency input {
+  width: 100px;
+}
+.widget-transparency output {
+  min-width: 4ch;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+body.layout-edit #panel,
+body.layout-edit #timeline {
+  visibility: hidden;
 }
 .layout-tools button {
   flex-shrink: 0;
@@ -353,7 +450,23 @@ body.layout-edit #liveHud {
 body.layout-edit .terminal-widget {
   pointer-events: auto;
   border: 1px dashed var(--accent);
-  background: var(--panel-bg);
+}
+body.layout-edit .widget-remove {
+  display: block;
+  width: 36px;
+  min-height: 36px;
+  margin: 0;
+  flex: 0 0 36px;
+  background: rgba(7, 14, 22, 0.35);
+  border: 0;
+  border-left: 1px solid var(--panel-line);
+  color: #e4edf2;
+  font:
+    20px/1 Consolas,
+    monospace;
+}
+body.layout-edit .widget-remove:hover {
+  background: rgba(157, 63, 58, 0.55);
 }
 body.layout-edit .widget-handle {
   cursor: grab;
@@ -414,7 +527,7 @@ body.layout-edit .dragging {
   .weather-card {
     padding: 0 12px 11px;
   }
-  .weather-card > .widget-handle {
+  .weather-card > .widget-header {
     margin: 0 -12px 10px;
   }
   .weather-main strong {
@@ -425,10 +538,21 @@ body.layout-edit .dragging {
     overflow: auto;
   }
   .layout-tools {
-    gap: 6px;
-    flex-wrap: wrap;
+    width: calc(100vw - 24px);
+    bottom: 12px;
+    padding: 12px;
   }
-  .layout-tools span {
+  .layout-caption {
+    display: block;
+  }
+  .layout-caption span {
+    display: block;
+    margin-top: 6px;
+  }
+  .widget-transparency {
     width: 100%;
+  }
+  .widget-transparency input {
+    flex: 1;
   }
 }

@@ -32,6 +32,22 @@ export function vnoise1(x: number, s: number) {
     b = NV[NP[(xa + 1) & 255]];
   return a + (b - a) * u;
 }
+// Immutable interpolation coefficients, shared by all worlds and layers.
+export const NOISE_LATTICE = Array.from({ length: 4 }, () => new Float64Array(65536));
+for (let x = 0; x < 256; x++)
+  for (let y = 0; y < 256; y++) {
+    const i = x * 256 + y,
+      xb = (x + 1) & 255,
+      yb = (y + 1) & 255;
+    const a = NV[NP[NP[x] + y]],
+      b = NV[NP[NP[xb] + y]],
+      c = NV[NP[NP[x] + yb]],
+      d = NV[NP[NP[xb] + yb]];
+    NOISE_LATTICE[0][i] = a;
+    NOISE_LATTICE[1][i] = b - a;
+    NOISE_LATTICE[2][i] = c - a;
+    NOISE_LATTICE[3][i] = a - b - c + d;
+  }
 export function vnoise2(x: number, y: number, s: number) {
   const ix = Math.floor(x),
     iy = Math.floor(y),
@@ -39,15 +55,13 @@ export function vnoise2(x: number, y: number, s: number) {
     fy = y - iy,
     ux = fx * fx * (3 - 2 * fx),
     uy = fy * fy * (3 - 2 * fy);
-  const xa = (ix + s * 37) & 255,
-    xb = (xa + 1) & 255,
-    ya = (iy + s * 61) & 255,
-    yb = (ya + 1) & 255;
-  const a = NV[NP[NP[xa] + ya]],
-    b = NV[NP[NP[xb] + ya]],
-    c = NV[NP[NP[xa] + yb]],
-    d = NV[NP[NP[xb] + yb]];
-  return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy;
+  const i = ((ix + s * 37) & 255) * 256 + ((iy + s * 61) & 255);
+  return (
+    NOISE_LATTICE[0][i] +
+    NOISE_LATTICE[1][i] * ux +
+    NOISE_LATTICE[2][i] * uy +
+    NOISE_LATTICE[3][i] * ux * uy
+  );
 }
 export function fbm1(x: number, s: number) {
   return vnoise1(x, s) * 0.55 + vnoise1(x * 2.1, s + 7) * 0.3 + vnoise1(x * 4.3, s + 13) * 0.15;

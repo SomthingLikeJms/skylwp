@@ -84,6 +84,11 @@ export function handleAgentEvent(W: World, event: CityEvent): void {
       agent.state = 'ended';
       agent.current = '';
       agent.tool = null;
+      if (event.data.reason === 'inactive') {
+        agent.inactive = true;
+        logEvent(W, `${agent.name} 暂停跟踪这个会话`);
+        break;
+      }
       if (tower) {
         if (agent.total > 0) {
           syncProgress(W, agent);

@@ -46,6 +46,23 @@ impl WidgetPositions {
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+pub struct WidgetAppearance {
+    pub weather: bool,
+    pub agents: bool,
+    pub opacity: f64,
+}
+impl Default for WidgetAppearance {
+    fn default() -> Self {
+        Self {
+            weather: true,
+            agents: true,
+            opacity: 0.18,
+        }
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct WeatherThresholds {
     pub cloud: f64,
     pub rain: f64,
@@ -106,6 +123,7 @@ pub struct Config {
     pub weather_mode: String,
     pub weather_thresholds: WeatherThresholds,
     pub widget_positions: WidgetPositions,
+    pub widget_appearance: WidgetAppearance,
     pub privacy: bool,
     pub pause_when_covered: bool,
     pub scene: String,
@@ -131,6 +149,7 @@ impl Default for Config {
             weather_mode: "load".into(),
             weather_thresholds: WeatherThresholds::default(),
             widget_positions: WidgetPositions::default(),
+            widget_appearance: WidgetAppearance::default(),
             privacy: false,
             pause_when_covered: true,
             scene: "bund".into(),
@@ -210,6 +229,7 @@ pub struct Shared {
     pub running: AtomicBool,
     pub ready: AtomicBool,
     pub interactive: AtomicBool,
+    pub mode_request: AtomicU64,
     pub manual_pause: AtomicBool,
     pub covered: AtomicBool,
     pub battery: AtomicBool,
@@ -258,6 +278,7 @@ impl Host {
             running: AtomicBool::new(true),
             ready: AtomicBool::new(false),
             interactive: AtomicBool::new(false),
+            mode_request: AtomicU64::new(0),
             manual_pause: AtomicBool::new(false),
             covered: AtomicBool::new(false),
             battery: AtomicBool::new(false),
@@ -485,6 +506,16 @@ mod tests {
         let config: Config =
             serde_json::from_value(json!({"weatherCity":"system","density":9})).unwrap();
         assert!(config.widget_positions.valid());
+        assert!(config.widget_appearance.weather);
+        assert!(config.widget_appearance.agents);
+        assert_eq!(config.widget_appearance.opacity, 0.18);
+        let mut changed = config.clone();
+        changed.widget_appearance.weather = false;
+        changed.widget_appearance.opacity = 0.05;
+        let restored: Config =
+            serde_json::from_value(serde_json::to_value(changed).unwrap()).unwrap();
+        assert!(!restored.widget_appearance.weather);
+        assert_eq!(restored.widget_appearance.opacity, 0.05);
         assert_eq!(
             config.widget_positions.agents.x,
             config.widget_positions.weather.x

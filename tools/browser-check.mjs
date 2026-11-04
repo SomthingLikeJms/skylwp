@@ -46,6 +46,7 @@ try {
   await page.locator('#privacyChk').check();
   await page.waitForTimeout(150);
   assert.doesNotMatch(await page.locator('#statusline').textContent(), /修复登录测试|构建城市渲染器/);
+  assert.doesNotMatch(await page.locator('#agentFeed').textContent(), /修复登录测试|构建城市渲染器/);
   const exported = await page.evaluate(() => window.asciiCity.export());
   assert.doesNotMatch(exported, /修复登录测试|构建城市渲染器|城市电台/);
   await fs.writeFile(path.join(directory, 'sanitized-recording.jsonl'), exported);

@@ -1,26 +1,18 @@
-import type { World, Settings, Color, Tower, StaticEntity, BoatKind } from '../world/types';
+import { drawTowers } from './towers';
+import { drawCityDepth } from './depth';
+import { drawWaterfrontLife, drawStreetLife } from './life';
+import { drawBrowserVessels } from './vessels';
+import { drawPromenade } from './promenade';
+import type { World, Settings, Color, StaticEntity } from '../world/types';
 import { clamp, smooth, lerp, mix3, mul3, add3, lum3 } from '../world/math';
-import { hash2, vnoise2, fbm2 } from '../world/noise';
+import { hash2, vnoise2 } from '../world/noise';
+import { staticLayers } from './cache';
+import { drawClouds, drawRidge, drawWaterBase, drawFog, packCells } from './layers';
 import { skyColors, DOTX, DOTY } from '../world/palette';
-import {
-  gi,
-  BR0,
-  G_DOT,
-  G_DASH,
-  G_TIL,
-  G_APX,
-  G_EQ,
-  G_SQ,
-  G_BRK,
-  G_MID,
-  G_US,
-  CODEG,
-  GLITCHG,
-} from '../engine/glyphs';
-import { CATS } from '../scenes';
-import { reg, addLight, fogParams } from '../world/light';
+import { gi, BR0, G_MID, G_US } from '../engine/glyphs';
+
+import { reg, addLight } from '../world/light';
 import { skyEffects, waterEffects, atmosphereFinish } from './atmosphere';
-import { SIGNAL_COLORS } from './digital';
 import { drawDataRipples } from './data-water';
 import { moonWeather, weatherMoonColor, drawWeatherMoon } from './weather-moon';
 export function compose(
@@ -64,8 +56,7 @@ export function compose(
   W.bcg.fill(0);
   W.bcb.fill(0);
   W.entities.length = 0;
-  const odd_ = W.frame & 1,
-    first = W.frame < 3;
+  const cached = staticLayers(W);
   const sc = W.sc,
     t = W.t,
     hour =
@@ -98,9 +89,6 @@ export function compose(
     hor = mix3(hor, [lh * 0.85, lh * 0.88, lh * 0.95], rain * 0.65);
   }
   const amb = lerp(0.34, 1, day) * (1 - rain * 0.22);
-  let ambC = mix3([0.5, 0.58, 0.92], [1, 0.97, 0.92], day);
-  ambC = add3(ambC, [0.25 * dusk, 0.06 * dusk, -0.05 * dusk]);
-  ambC = mul3(ambC, amb);
   W.env = { day, night, dusk, heat, rain, net, amb, top, hor };
   const lightOn = (0.3 + 0.7 * night) * (1 - W.away * (S.effects > 0 ? 0.26 : 0.7));
   const musicLevel = W.musicLvl * S.intensity;
@@ -175,14 +163,14 @@ export function compose(
     skyG[y] = lerp(top[1], hor[1], tt);
     skyB[y] = lerp(top[2], hor[2], tt);
   }
-  for (let y = 0; y < wy; y++)
-    for (let x = 0; x < cols; x++) {
-      const i = y * cols + x;
-      br[i] = skyR[y];
-      bgc[i] = skyG[y];
-      bb[i] = skyB[y];
-      ent[i] = ID.sky;
-    }
+  ent.fill(ID.sky, 0, wy * cols);
+  for (let y = 0; y < wy; y++) {
+    const start = y * cols,
+      end = start + cols;
+    br.fill(skyR[y], start, end);
+    bgc.fill(skyG[y], start, end);
+    bb.fill(skyB[y], start, end);
+  }
   if (night > 0.03) {
     const sv = night * night * (1 - rain * 0.9) * 0.75;
     for (const s of W.stars) {
@@ -248,7 +236,9 @@ export function compose(
     );
   }
   const sunCol = mix3([1, 0.86, 0.6], [1, 0.42, 0.22], Math.min(1, heat * 0.8 + dusk * 0.6));
-  if (sunE > -0.08) {
+  // The weather moon owns the celestial layer, including its water reflection.
+  // Otherwise the daytime sun looks like a second moon beside the custom face.
+  if (!actualMoon && sunE > -0.08) {
     sunX = Math.round(cols * (0.12 + 0.76 * ((hour - 6) / 12)));
     const sy = Math.round(skyTop + 2 - sunE * (skyTop - 1) * 0.9);
     disc(
@@ -271,84 +261,9 @@ export function compose(
     mul3(mix3(hor, [0.9, 0.9, 0.95], 0.3), 0.25 + 0.75 * day),
     add3(mul3([0.5, 0.26, 0.2], dusk), mul3([0.1, 0.11, 0.16], night)),
   );
-  for (let y = 1; y < wy - 2; y++) {
-    const sr = skyR[y],
-      sg = skyG[y],
-      sbb = skyB[y];
-    const ug = glowK * 1.6 * Math.pow(y / wy, 1.5);
-    const cl = add3(clBase, mul3(sc.glow, ug));
-    for (let x = 0; x < cols; x++) {
-      const i = y * cols + x;
-      let n;
-      n = fbm2(
-        x * 0.035 - (first || (y & 1) === odd_ ? W.cloudOff : W.previousCloudOff),
-        y * 0.16,
-        seed + 31,
-      );
-      W.cloudN[i] = n;
-      if (n < thr) continue;
-      const d = Math.min(1, ((n - thr) / (1 - thr)) * 1.6);
-      if (solid[i] === 1 && d < 0.35) continue;
-      const m = 0.32 + 0.6 * d,
-        mb = 0.04 + 0.14 * d;
-      PS(
-        i,
-        d < 0.18 ? G_DOT : d < 0.4 ? G_DASH : d < 0.7 ? G_TIL : G_APX,
-        sr + (cl[0] - sr) * m,
-        sg + (cl[1] - sg) * m,
-        sbb + (cl[2] - sbb) * m,
-      );
-      ent[i] = ID.cloud;
-      br[i] += (cl[0] - br[i]) * mb;
-      bgc[i] += (cl[1] - bgc[i]) * mb;
-      bb[i] += (cl[2] - bb[i]) * mb;
-      solid[i] = 0;
-      emR[i] = emG[i] = emB[i] = 0;
-    }
-  }
-  // ridge behind the city (Victoria Peak)
-  if (W.ridge) {
-    for (let k = 0; k < 2; k++) {
-      const arr = W.ridge[k],
-        mk = k ? 0.82 : 0.62;
-      const dkc = mix3([0.012, 0.02, 0.024], [0.12, 0.18, 0.15], day * 0.6);
-      for (let x = 0; x < cols; x++) {
-        const tp = Math.floor(arr[x]);
-        for (let y = Math.max(0, tp); y <= baseY; y++) {
-          const i = y * cols + x;
-          const bgK = mix3([skyR[y], skyG[y], skyB[y]], dkc, mk);
-          br[i] = bgK[0];
-          bgc[i] = bgK[1];
-          bb[i] = bgK[2];
-          glyph[i] = 0;
-          solid[i] = 0;
-          ent[i] = ID.ridge;
-          emR[i] = emG[i] = emB[i] = 0;
-          if (y === tp) {
-            const sl = arr[Math.min(cols - 1, x + 1)] - arr[Math.max(0, x - 1)];
-            PS(
-              i,
-              sl < -0.55 ? gi('/') : sl > 0.55 ? gi('\\') : G_DASH,
-              bgK[0] + hor[0] * 0.25,
-              bgK[1] + hor[1] * 0.25,
-              bgK[2] + hor[2] * 0.25,
-            );
-            continue;
-          }
-          const dep = (y - tp) / Math.max(1, baseY - tp),
-            hh = hash2(x, y, seed + 29 + k);
-          if (hh < 0.06 + 0.2 * dep + 0.1 * k * dep) {
-            const on = hash2(x, y, Math.floor(t * 0.03) + 7) < lightOn * 0.85;
-            if (on) {
-              const c = mul3(sc.wins[(x + y) % 3], 0.55 + 0.3 * hh * 4);
-              PS(i, G_MID, c[0], c[1], c[2]);
-              EM(i, c, 0.7);
-            }
-          } else if (hh < 0.12) PS(i, G_DOT, bgK[0] * 1.6, bgK[1] * 1.7, bgK[2] * 1.6);
-        }
-      }
-    }
-  }
+  drawClouds(W, ID.cloud, clBase, glowK, thr);
+  drawRidge(W, ID.ridge, day, lightOn, hor);
+  drawCityDepth(W);
   skyEffects(W, S, night);
   if (actualMoon) {
     const id = reg(W, { kind: 'moon' });
@@ -367,251 +282,18 @@ export function compose(
           if (((x - moonX) * 0.5) ** 2 + (y - moonY) ** 2 < rad * rad) ent[y * cols + x] = id;
     } else drawWeatherMoon(W, moonX + 0.5, moonY + 0.5, rad, id);
   }
-  // ── towers
-  const act = W.act || 0,
-    KC: Record<string, Color> = {
-      steel: mul3([0.55, 0.57, 0.62], 0.3 + 0.6 * amb),
-      pearlS: mul3([0.78, 0.5, 0.62], 0.3 + 0.6 * amb),
-      tank: mul3([0.3, 0.23, 0.18], 0.35 + 0.6 * amb),
-      fin: mul3([0.6, 0.66, 0.74], 0.35 + 0.6 * amb),
-      seam: mul3([0.55, 0.7, 0.85], 0.25 + 0.4 * amb),
-      facet: mul3([0.6, 0.75, 0.9], 0.25 + 0.35 * night + 0.2 * day),
-    };
-  const pearlCol = mix3([1, 0.38, 0.66], musicCol, sc.music === 'pearl' ? musicLevel : 0);
-  const neonPal = [
-      [1, 0.25, 0.3],
-      [0.95, 0.95, 1],
-      [0.75, 0.4, 1],
-      [1, 0.85, 0.3],
-    ],
-    neonCol = neonPal[Math.floor(hour * 4) % 4];
-  const LK: Record<string, Color> = {
-    pearl: mul3(pearlCol, 1.1 * (0.8 + 0.3 * beatEnvelope)),
-    pearlDim: mul3(pearlCol, 0.55),
-    gold: [1, 0.74, 0.34],
-    crownW: [0.88, 0.93, 1],
-    crownC: mul3(musicCol, 0.85 + 0.3 * beatEnvelope),
-    brace: [0.82, 0.9, 1],
-    neon: neonCol,
-  };
-  const waveOn = sc.music === 'pearl' && musicLevel > 0.05 && night > 0.3;
-  const drawTower = (T: Tower) => {
-    const st = T.st,
-      w = st.w,
-      h = st.h,
-      cls = st.cls,
-      id = reg(W, { kind: 'tower', ref: T });
-    const own = T.owner >= 0 ? W.agents[T.owner] : null;
-    let bgT = mix3(
-      add3([0.026, 0.03, 0.045], mul3(T.tone, 0.035)),
-      mul3(mul3(T.tone, 0.62), amb * 1.05),
-      day,
-    );
-    if (T.layer === 0) bgT = mix3(bgT, hor, 0.32 + 0.2 * day);
-    const edgeC = add3(mix3(bgT, hor, 0.28), mul3([0.05, 0.055, 0.07], 0.5 + 0.6 * day));
-    const litP =
-      clamp((0.1 + 0.72 * night) * T.litK * (1 - W.away * (S.effects > 0 ? 0.28 : 0.85)), 0, 0.97) *
-      (T.err > 0 ? 0.1 : 1);
-    const wc = T.layer === 0 ? mul3(T.wc, 0.75) : T.wc,
-      offC = mix3(mul3(bgT, 1.5), mul3(hor, 0.55), day * 0.6 + 0.1);
-    const led =
-      own &&
-      own.state !== 'ended' &&
-      h >= 2 &&
-      (act > 0.05 || W.t - own.lastActive < 15 || T.err > 0 || T.flash > 0);
-    const constr =
-      own &&
-      own.state === 'working' &&
-      own.site === T.idx &&
-      (own.total ? own.done < own.total : W.t - own.lastActive < 20);
-    const ledC =
-      T.err > 0
-        ? [1, 0.18, 0.14]
-        : T.flash > 0
-          ? mix3(own ? own.col : [1, 1, 1], [0.5, 1, 0.6], Math.min(1, T.flash))
-          : own
-            ? own.col
-            : [1, 1, 1];
-    const ledK = (0.35 + 0.65 * act) * (0.45 + 0.55 * night),
-      win = T.win,
-      jitK = heat > 0.02 ? heat * T.shim : 0;
-    const wave = waveOn && T.wave,
-      wavePos = (W.beatPh * 3) % (h + 4);
-    const digitalFacade =
-      S.effects > 0 &&
-      T.kind === 'gen' &&
-      T.w >= 5 &&
-      T.seed % 4 !== 0 &&
-      !(T.spectrum >= 0 && musicLevel > 0.01 && W.t - W.audio.lastFrame < 1);
-    for (let dy = 0; dy < h; dy++) {
-      const y = baseY - dy;
-      if (y < 0) break;
-      const jx = jitK ? Math.round(jitK * Math.sin(y * 0.9 + t * 6 + T.seed)) : 0;
-      const scanRow = ((t * (0.8 + sig.cpu * 2) + T.seed) % (h + 8)) - 4;
-      const signalColor = SIGNAL_COLORS[T.seed % SIGNAL_COLORS.length];
-      for (let dx = 0; dx < w; dx++) {
-        const c = cls[dy * w + dx];
-        if (!c) continue;
-        const x = T.x + dx + jx;
-        if (x < 0 || x >= cols) continue;
-        const i = y * cols + x;
-        br[i] = bgT[0];
-        bgc[i] = bgT[1];
-        bb[i] = bgT[2];
-        solid[i] = 2;
-        ent[i] = id;
-        glyph[i] = 0;
-        emR[i] = emG[i] = emB[i] = 0;
-        if (c >= 2) {
-          PS(i, c - 2, edgeC[0], edgeC[1], edgeC[2]);
-          continue;
-        }
-        if (wave && Math.abs(dy - (h - 1 - wavePos)) < 0.6) {
-          const q = mul3(musicCol, 0.9 * lightOn);
-          PS(i, gi('─'), q[0], q[1], q[2]);
-          EM(i, q, 0.8);
-          continue;
-        }
-        if (led && dy < h - (constr ? 2 : 0)) {
-          const spd = 0.7 + hash2(dx, 7, T.seed) * 1.3,
-            len = h + 8,
-            ph = (t * 5 * spd + hash2(dx, 9, T.seed) * len) % len,
-            head = h - 1 - ph,
-            dist = dy - head;
-          let I = dist >= 0 && dist < 7 ? 1 - dist / 7 : S.effects > 0 ? 0.19 : 0.07;
-          let g;
-          if (T.err > 0) {
-            I =
-              (hash2(dx, dy, Math.floor(t * 12)) < 0.5 ? 1 : 0.25) * (0.6 + 0.4 * Math.sin(t * 20));
-            g = GLITCHG[Math.floor(hash2(dx, dy, Math.floor(t * 9)) * GLITCHG.length)];
-          } else
-            g =
-              CODEG[
-                Math.floor(hash2(dx * 31 + dy, Math.floor(t * 4 + dx * 0.7), T.seed) * CODEG.length)
-              ];
-          const q = mul3(ledC, I * ledK);
-          PS(i, g, q[0], q[1], q[2]);
-          EM(i, q, 0.7);
-          continue;
-        }
-        let isW = false,
-          g = G_SQ;
-        if (win === 'grid') isW = (dx & 1) === 1;
-        else if (win === 'strip') {
-          isW = (dx & 1) === 1;
-          g = G_BRK;
-        } else if (win === 'dense') {
-          isW = true;
-          g = G_MID;
-        } else if (win === 'band') {
-          isW = (dy & 1) === 0;
-          g = G_DASH;
-        } else if (win === 'mesh') {
-          isW = dx % 3 === 1 && (dy & 1) === 0;
-        }
-        const scan = digitalFacade && Math.abs(dy - scanRow) < 0.75;
-        if (!isW) {
-          if (
-            digitalFacade &&
-            dx === 1 + (T.seed % Math.max(1, w - 2)) &&
-            dy < h - 2 &&
-            dy % 6 !== 0
-          ) {
-            const k = (scan ? 0.7 : 0.11) * (0.4 + 0.6 * night) * S.effects;
-            PS(
-              i,
-              scan ? G_MID : gi('¦'),
-              signalColor[0] * k,
-              signalColor[1] * k,
-              signalColor[2] * k,
-            );
-            if (scan) EM(i, signalColor, k * 0.4);
-          }
-          continue;
-        }
-        if (T.spectrum >= 0 && night > 0.2 && musicLevel > 0.01 && W.t - W.audio.lastFrame < 1) {
-          const level = W.audio.levels[T.spectrum] * S.intensity;
-          const lit = dy < h * level;
-          const color = lit ? musicCol : offC;
-          const k = lit ? lightOn * (0.6 + 0.4 * level) : 0.5;
-          PS(i, g, color[0] * k, color[1] * k, color[2] * k);
-          if (lit) EM(i, color, k * 0.75);
-          continue;
-        }
-        const on =
-          scan ||
-          hash2(T.seed + dx * 13, dy, Math.floor(t * 0.05 + hash2(dx, dy, T.seed) * 9)) < litP;
-        if (on) {
-          const k =
-            (0.7 + 0.45 * hash2(dx, dy, T.seed + 3)) *
-            (1 + beatEnvelope * 0.12) *
-            (scan ? 1.15 : 1);
-          const color = digitalFacade ? signalColor : wc;
-          if (digitalFacade && T.seed % 3 === 0 && dy % 5 === 0) g = G_DASH;
-          if (digitalFacade && heat > 0.15 && hash2(dx, dy, Math.floor(t * 3) + T.seed) > 0.99)
-            g = GLITCHG[(dx + dy) % GLITCHG.length];
-          PS(i, g, color[0] * k, color[1] * k, color[2] * k);
-          EM(i, color, k * 0.75);
-          if (T.layer > 0 && hash2(dx, dy, T.seed + 5) < 0.12) L(x, y, 1.2, wc, 0.1);
-        } else PS(i, g, offC[0], offC[1], offC[2]);
-      }
-    }
-    for (const o of st.ov) {
-      const y = baseY - o.dy;
-      if (y < 0 || y >= rows) continue;
-      const jx = jitK ? Math.round(jitK * Math.sin(y * 0.9 + t * 6 + T.seed)) : 0;
-      const x = T.x + o.dx + jx;
-      if (x < 0 || x >= cols) continue;
-      if (o.k === 1) {
-        const c = KC[o.key] || edgeC;
-        const i = P(x, y, o.g, c, id, 2);
-        emR[i] = emG[i] = emB[i] = 0;
-        continue;
-      }
-      let c,
-        k = lightOn;
-      if (o.key === 'beacon') {
-        const on = Math.sin(t * 2.6 + T.seed) > 0.35;
-        c = on ? [1, 0.2, 0.15] : [0.3, 0.06, 0.05];
-        k = on ? 1 : 1;
-        if (on) L(x, y, 1.4, c, 0.35 * night + 0.05);
-      } else if (o.key === 'strobe') {
-        const on = Math.sin(t * 4 + T.seed) > 0.85;
-        c = on ? [1, 1, 1] : [0.35, 0.36, 0.4];
-        k = 1;
-        if (on) L(x, y, 2, c, 0.4);
-      } else {
-        c = LK[o.key] || [1, 1, 1];
-        if (o.key === 'pearl' || o.key === 'crownC' || o.key === 'neon')
-          L(x, y, 1.6, c, 0.2 * lightOn);
-      }
-      const q = mul3(c, k);
-      const i = P(x, y, o.g, q, id, 2);
-      EM(i, q, 0.85);
-    }
-    if (constr) {
-      const tp = baseY - h + 1,
-        scf = mul3(own.col, 0.5 + 0.5 * amb);
-      for (let y = tp; y < Math.min(tp + 2, baseY); y++)
-        for (let dx = 0; dx < w; dx++) {
-          const x = T.x + dx;
-          if (x >= 0 && x < cols && y >= 0) P(x, y, (x + y) & 1 ? '┼' : '─', scf, id, 2);
-        }
-      const mx = T.x + w - 1,
-        cc = mul3(own.col, 0.65 + 0.35 * amb);
-      for (let k = 1; k <= 4; k++) P(mx, tp - k, k === 4 ? '┬' : '│', cc, id, 2);
-      for (let x = T.x - 2; x <= T.x + w; x++) if (x !== mx) P(x, tp - 4, '─', cc, id, 2);
-      const hx = Math.round(T.x - 1 + (Math.sin(t * 0.45 + T.seed) * 0.5 + 0.5) * w);
-      P(hx, tp - 3, '│', mul3(cc, 0.7), id, 2);
-      P(hx, tp - 2, '▪', mul3([0.75, 0.7, 0.6], 0.4 + 0.6 * amb), id, 2);
-      if (Math.sin(t * 3.2 + T.seed) > 0.3) {
-        const i = P(mx, tp - 5, '•', [1, 0.22, 0.16], id, 2);
-        EM(i, [1, 0.22, 0.16], 0.6);
-        L(mx, tp - 5, 1.4, [1, 0.2, 0.15], 0.1 + 0.35 * night);
-      }
-    }
-  };
-  for (const T of W.drawOrder) drawTower(T);
+  drawTowers(W, S, {
+    day,
+    night,
+    amb,
+    hor,
+    heat,
+    lightOn,
+    musicLevel,
+    beatEnvelope,
+    musicCol,
+    hour,
+  });
   // Ferris wheel (Victoria Harbour)
   if (W.wheel) {
     const wh = W.wheel,
@@ -751,64 +433,7 @@ export function compose(
   // ── water: mirrored sky, silhouettes and lights
   const wr = Math.max(1, promY - wy),
     deep = mix3([0.01, 0.022, 0.04], [0.07, 0.18, 0.28], day);
-  for (let y = wy; y < promY; y++) {
-    const d = y - wy,
-      f = d / wr,
-      ys = wy - 1 - Math.floor(d * 1.15),
-      rip = (0.4 + net * 1.2) * Math.min(2.2, 0.25 + d * 0.2),
-      mixK = 0.55 * (1 - f * 0.8);
-    for (let x = 0; x < cols; x++) {
-      const i = y * cols + x;
-      ent[i] = ID.water;
-      let r0 = deep[0],
-        g0 = deep[1],
-        b0 = deep[2];
-      if (ys >= 0) {
-        const j0 = ys * cols + x,
-          mk = mixK * (0.8 + 0.25 * vnoise2(x * 0.3, y * 1.2 - t * 0.8, seed + 57));
-        r0 = lerp(deep[0], br[j0] * 0.6, mk);
-        g0 = lerp(deep[1], bgc[j0] * 0.6, mk);
-        b0 = lerp(deep[2], bb[j0] * 0.6, mk);
-        const xs = clamp(x + Math.round(Math.sin(y * 1.9 + t * 2.1 + x * 0.07) * rip), 0, cols - 1),
-          j = ys * cols + xs;
-        if (emR[j] + emG[j] + emB[j] > 0.04) {
-          const sh = vnoise2(x * 0.9, y * 1.7 - t * 2.4, seed + 51);
-          const k = (sh > 0.5 ? 1 : 0.14) * (0.66 + S.effects * 0.18) * (1 - f * 0.55);
-          if (k > 0.08) {
-            br[i] = r0 + emR[j] * k * 0.12;
-            bgc[i] = g0 + emG[j] * k * 0.12;
-            bb[i] = b0 + emB[j] * k * 0.12;
-            PS(
-              i,
-              sh > 0.72 ? G_EQ : G_DASH,
-              emR[j] * k * 1.25,
-              emG[j] * k * 1.25,
-              emB[j] * k * 1.25,
-            );
-            continue;
-          }
-        }
-      }
-      br[i] = r0;
-      bgc[i] = g0;
-      bb[i] = b0;
-      const n = vnoise2(
-        x * (0.1 + (1 - f) * 0.3) - t * (0.25 + net * 0.9),
-        y * 0.85 + t * 0.12,
-        seed + 41,
-      );
-      if (n > 0.62) {
-        const k = 0.5 + 0.6 * n;
-        PS(
-          i,
-          n > 0.78 ? G_APX : n > 0.69 ? G_TIL : G_DASH,
-          lerp(r0, hor[0], 0.4) * k + 0.01,
-          lerp(g0, hor[1], 0.4) * k + 0.015,
-          lerp(b0, hor[2], 0.4) * k + 0.02,
-        );
-      }
-    }
-  }
+  drawWaterBase(W, S, ID.water, deep, hor, net);
   const refl = [];
   if (mE > 0 || actualMoon)
     refl.push({
@@ -817,7 +442,7 @@ export function compose(
       k: actualMoon ? 0.12 + night * 0.08 : 0.7 * night * (1 - rain * 0.6),
       w: 1.3,
     });
-  if (sunE > 0) refl.push({ x: sunX, c: sunCol, k: 0.8 * (1 - rain * 0.6), w: 2 });
+  if (!actualMoon && sunE > 0) refl.push({ x: sunX, c: sunCol, k: 0.8 * (1 - rain * 0.6), w: 2 });
   for (const r of refl) {
     if (r.k < 0.05) continue;
     for (let y = wy; y < promY; y++) {
@@ -839,64 +464,7 @@ export function compose(
   }
   waterEffects(W, S, night);
   drawDataRipples(W, S);
-  // boats
-  const SPR: Record<BoatKind, { far: string[]; near: string[]; hull: Color; sail?: Color }> = {
-    cruise: {
-      far: ['▪▪▪', '\\_/'],
-      near: [' ┌───┐ ', '▪▪▪▪▪▪▪', '\\_____/'],
-      hull: [0.82, 0.82, 0.86],
-    },
-    ferry: {
-      far: [' ▪ ', '\\_/'],
-      near: ['  ▄▄▄  ', '|▪▪▪▪▪|', '\\_____/'],
-      hull: [0.95, 0.5, 0.18],
-    },
-    hk: { far: [' ▪ ', '\\_/'], near: [' ┌───┐ ', '▪▪▪▪▪▪▪', '\\_____/'], hull: [0.2, 0.52, 0.36] },
-    junk: {
-      far: ['▓ ▓', '\\_/'],
-      near: [' ▓  ▓  ', ' ▓▓ ▓▓ ', '\\_____/'],
-      hull: [0.42, 0.26, 0.16],
-      sail: [0.72, 0.18, 0.12],
-    },
-  };
-  const warm = [1, 0.85, 0.6];
-  for (const s of W.ships) {
-    const id = reg(W, { kind: 'ship', ref: s }),
-      sp = SPR[s.kind],
-      spr = s.far ? sp.far : sp.near,
-      sx = Math.round(s.x),
-      cc = CATS[s.cat].col;
-    const hull = mul3(sp.hull, 0.3 + 0.65 * amb),
-      winc = mix3(warm, cc, 0.55),
-      sail = sp.sail ? mul3(sp.sail, 0.4 + 0.6 * amb) : null;
-    for (let r = 0; r < spr.length; r++) {
-      const row = spr[r],
-        y = s.y + r;
-      if (y < 0 || y >= rows) continue;
-      for (let j = 0; j < row.length; j++) {
-        const ch = row[j];
-        if (ch === ' ') continue;
-        const x = sx + j;
-        if (x < 0 || x >= cols) continue;
-        if (ch === '▪') {
-          const k =
-            lightOn * (0.75 + 0.25 * hash2(x, y, Math.floor(t * 0.5))) * (1 + 0.2 * beatEnvelope);
-          const i = P(x, y, ch, mul3(winc, k), id, 2);
-          EM(i, winc, k * 0.8);
-        } else if (ch === '▓') P(x, y, ch, sail!, id, 2);
-        else P(x, y, ch, r === spr.length - 1 ? hull : mul3(hull, 0.85), id, 2);
-      }
-    }
-    if (s.arriving || s.leaving) {
-      const wx = s.leaving ? sx - 1 : sx + spr[0].length,
-        wyy = s.y + spr.length - 1;
-      for (let k = 0; k < 3; k++) {
-        const x = wx + (s.leaving ? -k : k);
-        if (x >= 0 && x < cols && wyy < rows) P(x, wyy, '~', mul3(hor, 0.6 + 0.3 * amb));
-      }
-    }
-    L(sx + (spr[0].length >> 1), s.y + 1, 2.4, winc, 0.22 * lightOn);
-  }
+  drawBrowserVessels(W);
   // Brooklyn Bridge
   if (W.bridge) {
     const B = W.bridge,
@@ -990,52 +558,11 @@ export function compose(
       EM(i, c, 0.6);
     }
   }
-  // ── promenade
-  {
-    const ry = promY,
-      railC = mul3([0.42, 0.44, 0.5], 0.3 + 0.6 * amb),
-      lampC = [1, 0.82, 0.5];
-    for (let y = ry + 1; y < rows; y++) {
-      const f = (y - ry) / Math.max(1, rows - ry);
-      const pc = mix3(
-        mul3([0.2, 0.21, 0.24], 0.35 + 0.65 * amb),
-        [0.012, 0.013, 0.018],
-        0.3 + 0.55 * f,
-      );
-      for (let x = 0; x < cols; x++) {
-        const i = y * cols + x;
-        br[i] = pc[0];
-        bgc[i] = pc[1];
-        bb[i] = pc[2];
-        ent[i] = ID.prom;
-        glyph[i] = 0;
-        emR[i] = emG[i] = emB[i] = 0;
-        const hh = hash2(x, y, seed + 97);
-        if (hh < 0.05) PS(i, G_DOT, pc[0] * 1.8 + 0.02, pc[1] * 1.8 + 0.02, pc[2] * 1.8 + 0.02);
-        else if ((y - ry) % 3 === 0 && hh < 0.5)
-          PS(i, G_US, pc[0] * 1.4 + 0.01, pc[1] * 1.4 + 0.01, pc[2] * 1.4 + 0.01);
-      }
-    }
-    for (let x = 0; x < cols; x++) {
-      const post = x % 4 === 0;
-      P(x, ry, post ? '┬' : '─', railC, ID.rail, 2);
-      if (post && ry + 1 < rows) P(x, ry + 1, '│', mul3(railC, 0.8), ID.rail, 2);
-    }
-    for (let lx = W.lampOff; lx < cols; lx += W.lampGap) {
-      for (let k = 1; k <= 4; k++) P(lx, ry - k, '│', railC, ID.lamp, 2);
-      const on = lightOn > 0.35,
-        q = on ? mul3(lampC, lightOn) : mul3(railC, 1.1);
-      const i = P(lx, ry - 5, '•', q, ID.lamp, 2);
-      P(lx, ry - 6, '▄', railC, ID.lamp, 2);
-      if (on) {
-        EM(i, q, 0.6);
-        L(lx, ry - 5, 4.5, lampC, 0.55 * lightOn);
-        L(lx, ry + 3, 6, lampC, 0.3 * lightOn);
-      }
-    }
-  }
+  drawWaterfrontLife(W);
+  drawPromenade(W, ID);
+  drawStreetLife(W);
   // walkers on the promenade
-  if (W.away < 0.5) {
+  if (W.away < 0.5 && W.cols < 80) {
     const hy = promY + 2,
       by = promY + 3;
     for (const w of W.walkers) {
@@ -1120,74 +647,13 @@ export function compose(
   }
   if (S.cursor) L(S.cursor.x, S.cursor.y, 3.4, [1, 0.95, 0.85], 0.3);
   // low cloud deck and river mist (memory)
-  const fp = fogParams(W);
-  if (fp.deck > 0.01 || fp.mist > 0.01) {
-    const fc = add3(
-        mul3(mix3(hor, [0.62, 0.64, 0.68], 0.35), 0.35 + 0.65 * amb),
-        mul3(sc.glow, glowK * 1.4),
-      ),
-      tilde = G_TIL;
-    for (let y = 0; y < promY; y++) {
-      const prof =
-        fp.deck * Math.exp(-Math.pow((y - fp.deckY) / fp.deckW, 2)) +
-        fp.mist * Math.exp(-Math.pow((y - wy) / (rows * 0.06), 2));
-      if (prof < 0.02) continue;
-      const fresh = first || (y & 1) === odd_,
-        row = y * cols,
-        fo = t * (0.05 + net * 0.2);
-      for (let x = 0; x < cols; x++) {
-        const i = row + x;
-        let n;
-        n = vnoise2(
-          x * 0.05 - (fresh ? fo : Math.max(0, t - 1 / 30) * (0.05 + net * 0.2)),
-          y * 0.25,
-          seed + 81,
-        );
-        W.fogN[i] = n;
-        const Fv = Math.min(0.88, prof * (0.55 + 0.7 * n));
-        if (Fv < 0.02) continue;
-        fr[i] += (fc[0] - fr[i]) * Fv * 0.9;
-        fgc[i] += (fc[1] - fgc[i]) * Fv * 0.9;
-        fb[i] += (fc[2] - fb[i]) * Fv * 0.9;
-        br[i] += (fc[0] * 0.8 - br[i]) * Fv * 0.75;
-        bgc[i] += (fc[1] * 0.8 - bgc[i]) * Fv * 0.75;
-        bb[i] += (fc[2] * 0.8 - bb[i]) * Fv * 0.75;
-        if (glyph[i] === 0 && Fv > 0.4 && hash2(x, y, Math.floor(t * 0.5)) < 0.06) {
-          glyph[i] = tilde;
-          fr[i] = fc[0] * 1.1;
-          fgc[i] = fc[1] * 1.1;
-          fb[i] = fc[2] * 1.1;
-        }
-      }
-    }
-  }
+  drawFog(
+    W,
+    add3(mul3(mix3(hor, [0.62, 0.64, 0.68], 0.35), 0.35 + 0.65 * amb), mul3(sc.glow, glowK * 1.4)),
+    net,
+  );
   overlay?.();
   // light + pack
   atmosphereFinish(W, S);
-  const A = W.Ac,
-    B = W.Bc,
-    lr = W.lr,
-    lg = W.lgc,
-    lb = W.lb;
-  for (let i = 0, j = 0; i < N; i++, j += 4) {
-    let a = lr[i],
-      b2 = lg[i],
-      c = lb[i];
-    const gl_ = glyph[i];
-    if (a + b2 + c > 0) {
-      a = a / (1 + 0.6 * a);
-      b2 = b2 / (1 + 0.6 * b2);
-      c = c / (1 + 0.6 * c);
-    }
-    A[j] = S.effects > 0 ? Math.min(255, (fr[i] + a * 0.35) * 255) : (fr[i] + a * 0.35) * 255;
-    A[j + 1] =
-      S.effects > 0 ? Math.min(255, (fgc[i] + b2 * 0.35) * 255) : (fgc[i] + b2 * 0.35) * 255;
-    A[j + 2] = S.effects > 0 ? Math.min(255, (fb[i] + c * 0.35) * 255) : (fb[i] + c * 0.35) * 255;
-    A[j + 3] = gl_ & 255;
-    B[j] = S.effects > 0 ? Math.min(255, (br[i] + a * 0.26) * 255) : (br[i] + a * 0.26) * 255;
-    B[j + 1] =
-      S.effects > 0 ? Math.min(255, (bgc[i] + b2 * 0.26) * 255) : (bgc[i] + b2 * 0.26) * 255;
-    B[j + 2] = S.effects > 0 ? Math.min(255, (bb[i] + c * 0.26) * 255) : (bb[i] + c * 0.26) * 255;
-    B[j + 3] = gl_ >> 8;
-  }
+  packCells(W);
 }

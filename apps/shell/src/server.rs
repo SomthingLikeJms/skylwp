@@ -129,7 +129,7 @@ pub fn validate_external(v: &Value) -> Result<(), String> {
     }
     let data = v["data"].as_object().ok_or("Invalid data")?;
     let allowed: &[&str] = match kind {
-        "agent.session" => &["state", "name"],
+        "agent.session" => &["state", "name", "reason"],
         "agent.todo" => &["done", "total", "current"],
         "agent.tool" => &["kind", "ok"],
         "agent.activity" => &["phase"],
@@ -150,7 +150,11 @@ pub fn validate_external(v: &Value) -> Result<(), String> {
             ["thinking", "responding"].contains(&v["data"]["phase"].as_str().unwrap_or(""))
         }
         "agent.session" => {
-            ["start", "end"].contains(&v["data"]["state"].as_str().unwrap_or("")) && text("name")
+            ["start", "end"].contains(&v["data"]["state"].as_str().unwrap_or(""))
+                && text("name")
+                && data
+                    .get("reason")
+                    .is_none_or(|r| v["data"]["state"] == "end" && r == "inactive")
         }
         "agent.todo" => {
             v["data"]["done"]

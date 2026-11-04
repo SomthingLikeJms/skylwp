@@ -1,13 +1,16 @@
 use crate::state::Host;
 use serde_json::json;
 use std::{
-    sync::{atomic::Ordering, mpsc::sync_channel},
+    sync::{
+        atomic::Ordering,
+        mpsc::{sync_channel, SyncSender},
+    },
     time::{Duration, Instant},
 };
 use windows::{
     core::{w, Interface, BOOL},
     Win32::{
-        Foundation::{HWND, LPARAM, POINT, RECT},
+        Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
         System::{
             Com::{CoInitializeEx, COINIT_MULTITHREADED},
             Variant::{VariantToInt32, VT_I4},
@@ -15,12 +18,18 @@ use windows::{
         UI::{
             Accessibility::{AccessibleObjectFromWindow, IAccessible},
             HiDpi::{SetThreadDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2},
-            Input::KeyboardAndMouse::{
-                GetAsyncKeyState, VK_CONTROL, VK_LBUTTON, VK_MENU, VK_SHIFT,
+            Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL, VK_MENU, VK_SHIFT},
+            Input::{
+                GetRawInputData, RegisterRawInputDevices, HRAWINPUT, RAWINPUT, RAWINPUTDEVICE,
+                RAWINPUTHEADER, RIDEV_INPUTSINK, RID_INPUT,
             },
             WindowsAndMessaging::{
-                EnumWindows, FindWindowExW, GetAncestor, GetClassNameW, GetPhysicalCursorPos,
-                GetWindowRect, GetWindowThreadProcessId, WindowFromPoint, GA_ROOT, OBJID_CLIENT,
+                CreateWindowExW, DefWindowProcW, DispatchMessageW, EnumWindows, FindWindowExW,
+                GetAncestor, GetClassNameW, GetMessageW, GetPhysicalCursorPos, GetWindowLongPtrW,
+                GetWindowRect, GetWindowThreadProcessId, PostQuitMessage, RegisterClassW,
+                SetWindowLongPtrW, TranslateMessage, WindowFromPoint, CREATESTRUCTW, GA_ROOT,
+                GWLP_USERDATA, HWND_MESSAGE, MSG, OBJID_CLIENT, WINDOW_EX_STYLE, WINDOW_STYLE,
+                WM_DESTROY, WM_INPUT, WM_NCCREATE, WNDCLASSW,
             },
         },
     },
@@ -124,71 +133,158 @@ fn normalized(x: i32, y: i32, r: RECT) -> Option<(f64, f64)> {
     ))
 }
 
+struct RawMouse {
+    host: Host,
+    sender: SyncSender<Click>,
+    origin: Instant,
+    press: Option<Press>,
+}
+impl RawMouse {
+    unsafe fn packet(&mut self, input: RAWINPUT) {
+        if input.header.dwType != 0 {
+            return;
+        }
+        let mouse = input.data.mouse;
+        let flags = mouse.Anonymous.Anonymous.usButtonFlags;
+        if flags & 3 == 0 && self.press.is_none() {
+            return;
+        }
+        if !self.host.0.ready.load(Ordering::Relaxed)
+            || self.host.0.interactive.load(Ordering::Relaxed)
+            || !self.host.0.config.lock().unwrap().desktop_fireworks
+        {
+            self.press = None;
+            return;
+        }
+        let mut point = POINT::default();
+        if GetPhysicalCursorPos(&mut point).is_err() {
+            self.press = None;
+            return;
+        }
+        let time = self.origin.elapsed().as_millis() as u32;
+        if flags & 1 != 0 {
+            self.press = if !modifiers() && desktop_surface(point) {
+                Some(Press {
+                    x: point.x,
+                    y: point.y,
+                    time,
+                    dragged: false,
+                })
+            } else {
+                None
+            };
+        }
+        if let Some(p) = &mut self.press {
+            p.moved(point.x, point.y);
+        }
+        if flags & 2 != 0 {
+            if let Some(p) = self.press.take() {
+                if !modifiers() && p.is_click(point.x, point.y, time) {
+                    let _ = self.sender.try_send(Click {
+                        x: point.x,
+                        y: point.y,
+                        at: Instant::now(),
+                    });
+                }
+            }
+        }
+    }
+}
+unsafe extern "system" fn raw_window(
+    hwnd: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    if message == WM_NCCREATE {
+        let create = &*(lparam.0 as *const CREATESTRUCTW);
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, create.lpCreateParams as isize);
+    } else if message == WM_INPUT {
+        let context = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut RawMouse;
+        if !context.is_null() {
+            let mut input = RAWINPUT::default();
+            let mut bytes = std::mem::size_of::<RAWINPUT>() as u32;
+            if GetRawInputData(
+                HRAWINPUT(lparam.0 as *mut _),
+                RID_INPUT,
+                Some(&mut input as *mut _ as *mut _),
+                &mut bytes,
+                std::mem::size_of::<RAWINPUTHEADER>() as u32,
+            ) != u32::MAX
+            {
+                (*context).packet(input);
+            }
+        }
+    } else if message == WM_DESTROY {
+        PostQuitMessage(0);
+    }
+    DefWindowProcW(hwnd, message, wparam, lparam)
+}
+unsafe fn raw_mouse_loop(mut context: Box<RawMouse>) -> windows::core::Result<()> {
+    SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    let class_name = w!("AsciiCity.RawMouse");
+    let class = WNDCLASSW {
+        lpfnWndProc: Some(raw_window),
+        lpszClassName: class_name,
+        ..Default::default()
+    };
+    RegisterClassW(&class);
+    let window = CreateWindowExW(
+        WINDOW_EX_STYLE::default(),
+        class_name,
+        w!(""),
+        WINDOW_STYLE::default(),
+        0,
+        0,
+        0,
+        0,
+        Some(HWND_MESSAGE),
+        None,
+        None,
+        Some(&mut *context as *mut _ as *const _),
+    )?;
+    RegisterRawInputDevices(
+        &[RAWINPUTDEVICE {
+            usUsagePage: 1,
+            usUsage: 2,
+            dwFlags: RIDEV_INPUTSINK,
+            hwndTarget: window,
+        }],
+        std::mem::size_of::<RAWINPUTDEVICE>() as u32,
+    )?;
+    context.host.status("desktop", "已连接，原始鼠标输入");
+    let mut message = MSG::default();
+    while GetMessageW(&mut message, None, 0, 0).0 > 0 {
+        let _ = TranslateMessage(&message);
+        DispatchMessageW(&message);
+    }
+    Ok(())
+}
+
 pub fn run(host: Host) {
     let (sender, receiver) = sync_channel(8);
     let input_host = host.clone();
-    // Sample button edges without intercepting Explorer's mouse messages. This also
-    // avoids low-level-hook timeout removal when another desktop program is busy.
+    host.status("desktop", "正在连接原始鼠标输入");
     std::thread::spawn(move || unsafe {
-        SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-        let origin = Instant::now();
-        let mut was_down = false;
-        let mut press: Option<Press> = None;
-        while input_host.0.running.load(Ordering::Relaxed) {
-            let down = GetAsyncKeyState(VK_LBUTTON.0 as i32) < 0;
-            if !input_host.0.ready.load(Ordering::Relaxed)
-                || input_host.0.interactive.load(Ordering::Relaxed)
-                || !input_host.0.config.lock().unwrap().desktop_fireworks
-            {
-                press = None;
-                was_down = down;
-                std::thread::sleep(Duration::from_millis(32));
-                continue;
-            }
-            if down || was_down {
-                let mut point = POINT::default();
-                if GetPhysicalCursorPos(&mut point).is_ok() {
-                    let time = origin.elapsed().as_millis() as u32;
-                    if down && !was_down {
-                        press = if !modifiers() && desktop_surface(point) {
-                            Some(Press {
-                                x: point.x,
-                                y: point.y,
-                                time,
-                                dragged: false,
-                            })
-                        } else {
-                            None
-                        };
-                    } else if down {
-                        if let Some(p) = &mut press {
-                            p.moved(point.x, point.y);
-                        }
-                    } else if let Some(p) = press.take() {
-                        if !modifiers() && p.is_click(point.x, point.y, time) {
-                            let _ = sender.try_send(Click {
-                                x: point.x,
-                                y: point.y,
-                                at: Instant::now(),
-                            });
-                        }
-                    }
-                }
-            }
-            was_down = down;
-            std::thread::sleep(Duration::from_millis(8));
+        let state = Box::new(RawMouse {
+            host: input_host.clone(),
+            sender,
+            origin: Instant::now(),
+            press: None,
+        });
+        if let Err(error) = raw_mouse_loop(state) {
+            input_host.status("desktop", format!("桌面输入不可用：{error}"));
         }
     });
     unsafe {
         SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
     }
-    host.status("desktop", "已连接，单击桌面空白处放烟花");
     let debug = std::env::args().any(|a| a == "--debug-port");
     let mut last_click = Instant::now() - Duration::from_secs(1);
     while host.0.running.load(Ordering::Relaxed) {
-        let Ok(click) = receiver.recv_timeout(Duration::from_millis(100)) else {
-            continue;
+        let Ok(click) = receiver.recv() else {
+            return;
         };
         if host.0.interactive.load(Ordering::Relaxed)
             || !host.0.config.lock().unwrap().desktop_fireworks

@@ -33,7 +33,7 @@ export interface EventData {
   'audio.beat': { bpm: number; phase: number };
   'media.track': { title: string; artist: string; palette: string[] };
   'media.state': { playing: boolean };
-  'agent.session': { state: 'start' | 'end'; name: string };
+  'agent.session': { state: 'start' | 'end'; name: string; reason?: 'inactive' };
   'agent.todo': { done: number; total: number; current: string };
   'agent.tool': { kind: ToolKind; ok?: boolean };
   'agent.activity': { phase: 'thinking' | 'responding' };
@@ -82,7 +82,7 @@ const fields: Record<EventType, readonly string[]> = {
   'audio.beat': ['bpm', 'phase'],
   'media.track': ['title', 'artist', 'palette'],
   'media.state': ['playing'],
-  'agent.session': ['state', 'name'],
+  'agent.session': ['state', 'name', 'reason'],
   'agent.todo': ['done', 'total', 'current'],
   'agent.tool': ['kind', 'ok'],
   'agent.activity': ['phase'],
@@ -132,7 +132,10 @@ const validators: { [K in EventType]: (d: Record<string, unknown>) => boolean } 
     d.palette.length <= 4 &&
     d.palette.every(color),
   'media.state': (d) => bool(d.playing),
-  'agent.session': (d) => ['start', 'end'].includes(String(d.state)) && text(d.name, 64),
+  'agent.session': (d) =>
+    ['start', 'end'].includes(String(d.state)) &&
+    text(d.name, 64) &&
+    (d.reason === undefined || (d.state === 'end' && d.reason === 'inactive')),
   'agent.activity': (d) => ['thinking', 'responding'].includes(String(d.phase)),
   'agent.todo': (d) =>
     integer(d.done, 10000) &&

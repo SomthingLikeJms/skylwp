@@ -55,7 +55,7 @@ checksum = "d92bec98840b8f03a5ff5413de5293bfcd8bf96467cf5452609f939ec6f5de16"
 
 [[package]]
 name = "ascii-city-wallpaper"
-version = "0.5.0"
+version = "0.9.3"
 dependencies = [
  "chrono",
  "image",
@@ -72,6 +72,7 @@ dependencies = [
  "wasapi",
  "webview2-com",
  "windows 0.62.2",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
